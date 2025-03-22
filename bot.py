@@ -61,13 +61,13 @@ async def start(message: types.Message):
 # 📋 Ro‘yxatdan o‘tish
 @dp.message(lambda message: message.text == "📋 Ro‘yxatdan o‘tish")
 async def register_start(message: types.Message, state: FSMContext):
-    await message.answer("👶 Farzandingiz ismini kiriting:")
+    await message.answer("👶 Farzandingiz ism familiyasini kiriting:")
     await state.set_state(Registration.child_name)
 
 @dp.message(Registration.child_name)
 async def register_child_name(message: types.Message, state: FSMContext):
     await state.update_data(child_name=message.text)
-    await message.answer("👨‍👩‍👦 Ota-onaning ismini kiriting:")
+    await message.answer("👨‍👩‍👦 Ota-onaning ism familiyasini kiriting:")
     await state.set_state(Registration.parent_name)
 
 @dp.message(Registration.parent_name)
