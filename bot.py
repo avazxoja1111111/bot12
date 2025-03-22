@@ -27,6 +27,9 @@ menu = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="📚 Loyiha haqida")]
 ], resize_keyboard=True)
 
+admin_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+admin_keyboard.add(KeyboardButton("📢 Post yuborish"))
+
 # 📌 Ro‘yxatdan o‘tish uchun FSM
 class Registration(StatesGroup):
     child_name = State()
@@ -76,7 +79,6 @@ async def get_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
     data = await state.get_data()
 
-    # 📂 Ma'lumotlarni faylga yozish
     with open("users.txt", "a", encoding="utf-8") as file:
         file.write(f"{data['child_name']}, {data['parent_name']}, {data['age']}, {data['phone']}\n")
 
@@ -91,51 +93,34 @@ async def get_phone(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# 📌 💬 Fikr va maslahatlar
-class Feedback(StatesGroup):
-    text = State()
+# 📌 Admin panel
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
+    if message.from_user.id in ADMIN_IDS:
+        await message.answer("👨‍💻 Admin paneliga xush kelibsiz!", reply_markup=admin_keyboard)
 
-@dp.message(lambda message: message.text == "💬 Fikr va maslahatlar")
-async def ask_feedback(message: types.Message, state: FSMContext):
-    await message.answer("✍️ Fikr va takliflaringizni yozing:")
-    await state.set_state(Feedback.text)
+# 📢 Post yuborish
+@dp.message(lambda message: message.text == "📢 Post yuborish")
+async def ask_for_post(message: types.Message):
+    if message.from_user.id in ADMIN_IDS:
+        await message.answer("📨 Yubormoqchi bo'lgan xabaringizni yozing yoki rasm/video jo‘nating.")
 
-@dp.message(Feedback.text)
-async def receive_feedback(message: types.Message, state: FSMContext):
-    feedback_text = message.text
-    user_id = message.from_user.id
-    username = message.from_user.username if message.from_user.username else "No username"
-
-    # 📂 Fikrni faylga yozish
-    with open("feedbacks.txt", "a", encoding="utf-8") as file:
-        file.write(f"User ID: {user_id}, Username: {username}, Feedback: {feedback_text}\n")
-
-    # 📩 Adminlarga yuborish
-    admin_message = (
-        f"📩 <b>Yangi fikr va taklif:</b>\n"
-        f"👤 <b>Foydalanuvchi:</b> @{username} (ID: {user_id})\n"
-        f"💬 <b>Fikr:</b> {feedback_text}"
-    )
-
-    for admin_id in ADMIN_IDS:
-        try:
-            await bot.send_message(admin_id, admin_message, parse_mode=ParseMode.HTML)
-        except Exception as e:
-            print(f"⚠️ Admin {admin_id} ga habar yuborishda xatolik: {e}")
-
-    await message.answer("✅ Fikringiz uchun rahmat! Takliflaringiz inobatga olinadi.")
-    await state.clear()
-
-# 📚 Loyiha haqida
-@dp.message(lambda message: message.text == "📚 Loyiha haqida")
-async def about_project(message: types.Message):
-    await message.answer(
-        "📖 'KITOBXON KIDS' loyihasi bolalar uchun kitobxonlikni targ‘ib qilishga qaratilgan.\n\n"
-        "☎️ <b>Bog‘lanish uchun:</b>\n"
-        "📩 @Fotima0123\n"
-        "📞 +998882802806 / +998946442069",
-        parse_mode=ParseMode.HTML
-    )
+@dp.message(content_types=types.ContentTypes.ANY)
+async def broadcast_post(message: types.Message):
+    if message.from_user.id in ADMIN_IDS:
+        with open("users.txt", "r") as file:
+            users = file.read().splitlines()
+        
+        success_count = 0
+        for user_id in users:
+            try:
+                await bot.copy_message(chat_id=int(user_id), from_chat_id=message.chat.id, message_id=message.message_id)
+                success_count += 1
+                await asyncio.sleep(0.5)
+            except:
+                pass
+        
+        await message.answer(f"📢 Xabar {success_count} ta foydalanuvchiga yuborildi!")
 
 # **Botni ishga tushirish**
 async def main():
