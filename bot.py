@@ -64,7 +64,7 @@ async def start(message: types.Message, state: FSMContext):
     chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
     if chat_member.status not in ["member", "administrator", "creator"]:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✉️ Obuna bo'lish", url=f"https://t.me/{Kitobxon_Kids[1:]}")],
+            [InlineKeyboardButton(text="✉️ Obuna bo'lish", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")],
             [InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub")]
         ])
         await message.answer("✉️ Iltimos, quyidagi kanalga obuna bo'ling:", reply_markup=keyboard)
