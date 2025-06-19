@@ -129,7 +129,7 @@ async def register_district(message: types.Message, state: FSMContext):
 @dp.message(Registration.mahalla)
 async def register_mahalla(message: types.Message, state: FSMContext):
     await state.update_data(mahalla=message.text)
-    yosh_tanlash = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=str(y)) for y in range(7, 10)]], resize_keyboard=True)
+    yosh_tanlash = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=str(y)) for y in range(7, 11)]], resize_keyboard=True)
     await message.answer("📅 Yoshni tanlang:", reply_markup=yosh_tanlash)
     await state.set_state(Registration.age)
 
