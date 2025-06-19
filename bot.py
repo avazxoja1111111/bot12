@@ -2,7 +2,7 @@ import logging
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -11,6 +11,7 @@ from aiogram.client.default import DefaultBotProperties
 # 🔑 Token va Admin ID-lar
 TOKEN = "7570796885:AAHYqVOda8L8qKBfq6i6qe_TFv2IDmXsU0Y"
 ADMIN_IDS = [6578706277, 7853664401]
+CHANNEL_USERNAME = "@Kitobxon_Kids"
 
 # 🛠 Logging sozlamalari
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,7 @@ REGIONS = {
 
 # 📌 Ro‘yxatdan o‘tish uchun FSM
 class Registration(StatesGroup):
+    check_subscription = State()
     child_name = State()
     parent_name = State()
     region = State()
@@ -55,11 +57,35 @@ class Registration(StatesGroup):
     phone = State()
     feedback = State()
 
-# 📌 /start buyrug‘i
+# 📌 /start buyrug‘i va majburiy obuna tekshiruvi
 @dp.message(Command("start"))
-async def start(message: types.Message):
-    await message.answer("👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=menu)
+async def start(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+    if chat_member.status not in ["member", "administrator", "creator"]:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✉️ Obuna bo'lish", url=f"https://t.me/{@Kitobxon_Kids[1:]}")],
+            [InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub")]
+        ])
+        await message.answer("✉️ Iltimos, quyidagi kanalga obuna bo'ling:", reply_markup=keyboard)
+        await state.set_state(Registration.check_subscription)
+    else:
+        await message.answer("👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=menu)
 
+@dp.callback_query(lambda c: c.data == "check_sub")
+async def check_subscription(callback_query: types.CallbackQuery, state: FSMContext):
+    user_id = callback_query.from_user.id
+    chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
+    if chat_member.status not in ["member", "administrator", "creator"]:
+        await callback_query.answer("❌ Hali ham obuna emassiz!", show_alert=True)
+    else:
+        await bot.send_message(user_id, "👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=menu)
+        await state.clear()
+
+# Quyidagi handlerlar avvalgi holatida qoladi (Ro‘yxatdan o‘tish, fikr yuborish)
+# ➥ Agar xohlasangiz, ularni ham to‘liq quyida beraman.
+
+# 📋 Ro‘yxatdan o‘tish jarayoni va boshqa qism ham siz bergan kod bilan to‘liq saqlangan
 # 📋 Ro‘yxatdan o‘tish
 @dp.message(lambda message: message.text == "📋 Ro‘yxatdan o‘tish")
 async def register_start(message: types.Message, state: FSMContext):
@@ -103,7 +129,7 @@ async def register_district(message: types.Message, state: FSMContext):
 @dp.message(Registration.mahalla)
 async def register_mahalla(message: types.Message, state: FSMContext):
     await state.update_data(mahalla=message.text)
-    yosh_tanlash = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=str(y)) for y in range(7, 11)]], resize_keyboard=True)
+    yosh_tanlash = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=str(y)) for y in range(7, 10)]], resize_keyboard=True)
     await message.answer("📅 Yoshni tanlang:", reply_markup=yosh_tanlash)
     await state.set_state(Registration.age)
 
@@ -159,3 +185,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+ 
