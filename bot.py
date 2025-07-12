@@ -210,14 +210,14 @@ async def project_info(message: types.Message):
 • Adiblar merosini o‘rganish, o‘zlikni anglashga chorlash.
 
 🔹 <b>Tanlov bosqichlari:</b>
-1. <b>Saralash<b> (oy boshida test, 25 ta savol, har biri 4 ball).
-2. <b>Hududiy<b> (30 ta savol, har biri 30 soniya, top scorer keyingi bosqichga o‘tadi).
-3. <b>Respublika<b> (Fantaziya festivali, Taassurotlar, Savollar - 100 ballik tizim).
+1. Saralash (oy boshida test, 25 ta savol, har biri 4 ball).
+2. Hududiy (30 ta savol, har biri 30 soniya, top scorer keyingi bosqichga o‘tadi).
+3. Respublika (Fantaziya festivali, Taassurotlar, Savollar - 100 ballik tizim).
 
 🔹 <b>G‘oliblar:</b>
-• <b>1-o‘rin:<b> Noutbuk
-• <b>2-o‘rin:<b> Planshet
-• <b>3-o‘rin:<b> Telefon
+• 1-o‘rin: Noutbuk
+• 2-o‘rin: Planshet
+• 3-o‘rin: Telefon
 • Barcha qatnashchilarga velosiped
 
 🔹 <b>Moliya manbalari:</b>
@@ -226,7 +226,6 @@ async def project_info(message: types.Message):
 Batafsil: @Kitobxon_Kids kanali orqali kuzatib boring.
 """
     await message.answer(text)
-
 
 # 🛡 Reklama va spamni bloklash
 @dp.message()
