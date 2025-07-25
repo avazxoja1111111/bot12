@@ -169,7 +169,7 @@ async def register_phone(message: types.Message, state: FSMContext):
     for admin in ADMIN_IDS:
         await bot.send_message(admin, reg_info)
 
-    await message.answer("✅ Ro‘yxatdan o‘tish muvaffaqiyatli yakunlandi!", reply_markup=menu)
+    await message.answer("✅ Ro‘yxatdan o‘tish muvaffaqiyatli yakunlandi.!", reply_markup=menu)
     await state.clear()
 
 # 💬 Fikrlar
