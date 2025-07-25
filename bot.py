@@ -228,10 +228,10 @@ Batafsil: @Kitobxon_Kids kanali orqali kuzatib boring.
     await message.answer(text)
 
 # 🛡 Reklama va spamni bloklash
-@dp.message()
+@dp.message(lambda message: message.chat.type == "private" and any(x in message.text.lower() for x in ["t.me", "http", "@"]))
 async def block_ads(message: types.Message):
-    if any(x in message.text.lower() for x in ["t.me", "http", "@"]):
-        await message.delete()
+    await message.delete()
+
 
 # 📣 Botni ishga tushirish
 # 📣 Botni ishga tushirish
