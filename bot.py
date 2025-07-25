@@ -234,8 +234,11 @@ async def block_ads(message: types.Message):
         await message.delete()
 
 # 📣 Botni ishga tushirish
+# 📣 Botni ishga tushirish
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True)  # Webhookni o'chirib tashlaydi
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
