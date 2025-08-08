@@ -1,15 +1,16 @@
 import logging
-import os
-import random
 import sqlite3
 from datetime import datetime
 from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    InlineKeyboardMarkup, InlineKeyboardButton
+)
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-# -------------- CONFIG --------------
+# --------- CONFIG ---------
 TOKEN = "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk"
 ADMIN_IDS = [6578706277, 7853664401]
 CHANNEL_USERNAME = "@Kitobxon_Kids"
@@ -19,7 +20,7 @@ bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# -------------- STATE GROUPS --------------
+# --------- STATE GROUPS ---------
 class Registration(StatesGroup):
     check_subscription = State()
     child_name = State()
@@ -29,15 +30,15 @@ class Registration(StatesGroup):
     mahalla = State()
     age = State()
     phone = State()
-    feedback = State()
 
 class TakingTest(StatesGroup):
-    idle = State()
     answering = State()
 
-# -------------- MENUS --------------
+# --------- MENUS ---------
 menu = ReplyKeyboardMarkup(resize_keyboard=True).add(
     KeyboardButton("📖 Testni boshlash")
+).add(
+    KeyboardButton("📝 Ro‘yxatdan o‘tish")
 ).add(
     KeyboardButton("📚 Loyiha haqida"), KeyboardButton("💬 Fikr va maslahatlar")
 )
@@ -50,9 +51,9 @@ admin_menu = ReplyKeyboardMarkup(resize_keyboard=True).row(
     KeyboardButton("⬅ Asosiy menyu")
 )
 
-# -------------- REGIONS DATA --------------
+# --------- REGIONS DATA ---------
 REGIONS = {
-   "Toshkent shahri": ["Bektemir", "Chilonzor", "Mirzo Ulug‘bek", "Mirobod", "Olmazor", "Shayxontohur", "Sergeli", "Uchtepa", "Yashnobod", "Yakkasaroy", "Yunusobod"],
+    "Toshkent shahri": ["Bektemir", "Chilonzor", "Mirzo Ulug‘bek", "Mirobod", "Olmazor", "Shayxontohur", "Sergeli", "Uchtepa", "Yashnobod", "Yakkasaroy", "Yunusobod"],
     "Toshkent viloyati": ["Bekabad", "Bo‘ka", "Bo‘stonliq", "Chinoz", "Chirchiq", "Ohangaron", "Oqqo‘rg‘on", "Parkent", "Piskent", "Quyichirchiq", "O‘rtachirchiq", "Yangiyo‘l", "Toshkent", "Yuqorichirchiq", "Zangiota", "Nurafshon", "Olmaliq", "Angren"],
     "Andijon": ["Andijon shahri", "Asaka", "Baliqchi", "Bo‘ston", "Buloqboshi", "Izboskan", "Jalaquduq", "Marhamat", "Oltinko‘l", "Paxtaobod", "Paytug‘", "Qo‘rg‘ontepa", "Shahriston", "Xo‘jaobod"],
     "Farg‘ona": ["Beshariq", "Buvayda", "Dang‘ara", "Farg‘ona shahri", "Ferghana tumani", "Furqat", "Qo‘qon", "Quva", "Rishton", "So‘x", "Toshloq", "Uchko‘prik", "Yozyovon", "Oltiariq"],
@@ -68,8 +69,7 @@ REGIONS = {
     "Qoraqalpog‘iston": ["Amudaryo", "Beruniy", "Chimboy", "Ellikqala", "Kegeyli", "Mo‘ynoq", "Nukus", "Qanliko‘l", "Qo‘ng‘irot", "Taxiatosh", "To‘rtko‘l", "Xo‘jayli"]
 }
 
-
-# -------------- DATABASE --------------
+# --------- DATABASE ---------
 DB_PATH = "users.db"
 
 def init_db():
@@ -111,18 +111,18 @@ def save_user(user_id, data):
     conn.commit()
     conn.close()
 
-def get_all_users():
+def get_user_age(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT user_id, child_name, parent_name, region, district, mahalla, age, phone, registered_at FROM users")
-    res = c.fetchall()
+    c.execute("SELECT age FROM users WHERE user_id = ?", (user_id,))
+    row = c.fetchone()
     conn.close()
-    return res
+    return int(row[0]) if row else None
 
-# -------------- ACTIVE TESTS MEMORY --------------
+# --------- ACTIVE TESTS MEMORY ---------
 ACTIVE_TESTS = {}
 
-# -------------- TEST PARSING FUNCTION --------------
+# --------- TEST PARSING FUNCTION ---------
 def parse_test_txt(text):
     blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
     questions = []
@@ -150,14 +150,14 @@ def parse_test_txt(text):
             questions.append({"question": q_text, "options": opts[:4], "answer": ans})
     return questions
 
-# -------------- COMMANDS AND HANDLERS --------------
+# --------- COMMANDS AND HANDLERS ---------
 
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     try:
         chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-    except:
+    except Exception:
         chat_member = None
 
     if not chat_member or chat_member.status not in ["member", "administrator", "creator"]:
@@ -178,7 +178,7 @@ async def check_subscription(query: types.CallbackQuery, state: FSMContext):
     user_id = query.from_user.id
     try:
         chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-    except:
+    except Exception:
         chat_member = None
 
     if chat_member and chat_member.status in ["member", "administrator", "creator"]:
@@ -192,7 +192,7 @@ async def check_subscription(query: types.CallbackQuery, state: FSMContext):
     else:
         await query.answer("❗ Siz hali kanalga obuna bo‘lmadingiz.", show_alert=True)
 
-# Ro'yxatdan o'tish bosqichlari (misol uchun faqat child_name):
+# Ro'yxatdan o'tish bosqichlari:
 @dp.message_handler(lambda message: message.text == "📝 Ro‘yxatdan o‘tish")
 async def registration_start(message: types.Message):
     await message.answer("👶 Farzandingizning ismini kiriting:")
@@ -201,7 +201,7 @@ async def registration_start(message: types.Message):
 @dp.message_handler(state=Registration.child_name)
 async def registration_child_name(message: types.Message, state: FSMContext):
     text = message.text.strip()
-    if not text.isalpha() or len(text) < 2:
+    if not text.replace(" ", "").isalpha() or len(text) < 2:
         await message.answer("❗ Iltimos, faqat harflardan iborat to‘g‘ri ism kiriting.")
         return
     await state.update_data(child_name=text)
@@ -287,17 +287,10 @@ async def registration_phone(message: types.Message, state: FSMContext):
 @dp.message_handler(lambda message: message.text == "📖 Testni boshlash")
 async def user_start_test(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT age FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
+    user_age = get_user_age(user_id)
+    if not user_age:
         await message.answer("❗ Avval ro‘yxatdan o‘tishingiz kerak.", reply_markup=menu)
         return
-    user_age = int(row[0])
 
     # Test fayllni o'qish (matn formatida)
     questions_7_10 = []
@@ -315,212 +308,72 @@ async def user_start_test(message: types.Message, state: FSMContext):
     except FileNotFoundError:
         pass
 
-    total_questions = 25
-    count_7_10 = min(len(questions_7_10), total_questions // 2)
-    count_11_14 = total_questions - count_7_10
-
-    selected_7_10 = random.sample(questions_7_10, count_7_10) if questions_7_10 else []
-    selected_11_14 = random.sample(questions_11_14, count_11_14) if questions_11_14 else []
-
-    questions = selected_7_10 + selected_11_14
-    random.shuffle(questions)
+    if 7 <= user_age <= 10:
+        questions = questions_7_10
+    else:
+        questions = questions_11_14
 
     if not questions:
-        await message.answer("❗ Test savollari topilmadi. Iltimos admin bilan bog'laning.")
+        await message.answer("❗ Testlar mavjud emas. Iltimos, administrator bilan bog‘laning.")
         return
 
     ACTIVE_TESTS[user_id] = {
         "questions": questions,
-        "q_index": 0,
-        "correct_count": 0,
-        "answers": []
+        "current_index": 0,
+        "score": 0
     }
 
-    await message.answer(f"🧪 Test boshlandi! Jami savollar: {len(questions)}. Har bir savolga 60 soniya vaqt beriladi.", reply_markup=ReplyKeyboardRemove())
-    await send_question_to_user(user_id)
+    question = questions[0]
+    options = question["options"]
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    option_buttons = []
+    for i, opt in enumerate(options):
+        btn = InlineKeyboardButton(f"{chr(65 + i)}) {opt}", callback_data=f"answer_{chr(65 + i)}")
+        option_buttons.append(btn)
+    keyboard.add(*option_buttons)
 
-async def send_question_to_user(user_id):
-    test = ACTIVE_TESTS.get(user_id)
-    if not test:
-        return
-    q_index = test["q_index"]
-    questions = test["questions"]
+    await message.answer(f"1-savol:\n{question['question']}", reply_markup=keyboard)
+    await TakingTest.answering.set()
 
-    if q_index >= len(questions):
-        await finish_test(user_id)
-        return
-
-    q = questions[q_index]
-    question_text = f"<b>Savol {q_index + 1}:</b>\n{q['question']}\n\n"
-    options = q["options"]
-    options_text = "\n".join([f"{chr(65+i)}) {opt}" for i, opt in enumerate(options)])
-    await bot.send_message(user_id, question_text + options_text, parse_mode="HTML")
-
-@dp.message_handler(lambda message: message.text in ["A", "B", "C", "D"])
-async def answer_handler(message: types.Message):
-    user_id = message.from_user.id
-    test = ACTIVE_TESTS.get(user_id)
-    if not test:
-        await message.answer("❗ Sizda faol test mavjud emas. Testni boshlash uchun 📖 Testni boshlash tugmasini bosing.", reply_markup=menu)
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("answer_"), state=TakingTest.answering)
+async def answer_question(query: types.CallbackQuery, state: FSMContext):
+    user_id = query.from_user.id
+    user_test = ACTIVE_TESTS.get(user_id)
+    if not user_test:
+        await query.answer("❗ Sizda faol test topilmadi. Iltimos, testni qayta boshlang.")
+        await state.finish()
         return
 
-    q_index = test["q_index"]
-    questions = test["questions"]
+    selected = query.data.split("_")[1]
+    current_index = user_test["current_index"]
+    question = user_test["questions"][current_index]
 
-    if q_index >= len(questions):
-        await message.answer("❗ Test allaqachon tugagan.")
-        return
+    if selected == question["answer"]:
+        user_test["score"] += 1
 
-    user_answer = message.text.upper()
-    correct_answer = questions[q_index]["answer"].upper()
+    user_test["current_index"] += 1
 
-    if user_answer == correct_answer:
-        test["correct_count"] += 1
-    test["answers"].append({
-        "question": questions[q_index]["question"],
-        "user_answer": user_answer,
-        "correct_answer": correct_answer
-    })
+    if user_test["current_index"] < len(user_test["questions"]):
+        next_q = user_test["questions"][user_test["current_index"]]
+        options = next_q["options"]
+        keyboard = InlineKeyboardMarkup(row_width=2)
+        option_buttons = []
+        for i, opt in enumerate(options):
+            btn = InlineKeyboardButton(f"{chr(65 + i)}) {opt}", callback_data=f"answer_{chr(65 + i)}")
+            option_buttons.append(btn)
+        keyboard.add(*option_buttons)
 
-    test["q_index"] += 1
-
-    if test["q_index"] < len(questions):
-        await send_question_to_user(user_id)
+        await query.message.edit_text(f"{user_test['current_index'] + 1}-savol:\n{next_q['question']}", reply_markup=keyboard)
+        await query.answer()
     else:
-        await finish_test(user_id)
+        score = user_test["score"]
+        total = len(user_test["questions"])
+        await query.message.edit_text(f"Test yakunlandi!\nSizning natijangiz: {score} / {total}")
+        await query.answer()
+        ACTIVE_TESTS.pop(user_id, None)
+        await state.finish()
 
-async def finish_test(user_id):
-    test = ACTIVE_TESTS.get(user_id)
-    if not test:
-        return
-    total = len(test["questions"])
-    correct = test["correct_count"]
-    percent = round((correct / total) * 100, 2) if total > 0 else 0.0
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT child_name, parent_name, region, district, mahalla, age, phone FROM users WHERE user_id = ?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-
-    child_name = row[0] if row else "Noma'lum"
-    parent_name = row[1] if row else "Noma'lum"
-    region = row[2] if row else "Noma'lum"
-    district = row[3] if row else "Noma'lum"
-    mahalla = row[4] if row else "Noma'lum"
-    age = row[5] if row else "Noma'lum"
-    phone = row[6] if row else "Noma'lum"
-
-    await bot.send_message(user_id,
-        f"✅ Test yakunlandi!\n\n"
-        f"👧 Farzand: {child_name}\n"
-        f"👨‍👩‍👧 Ota/onasi: {parent_name}\n"
-        f"🌍 Hudud: {region} - {district} - {mahalla}\n"
-        f"🎂 Yosh: {age}\n"
-        f"📞 Telefon: {phone}\n\n"
-        f"✅ To‘g‘ri javoblar: {correct} / {total}\n"
-        f"📊 Natija: {percent}%",
-        reply_markup=menu
-    )
-
-    # Natijani adminlarga yuborish
-    result_msg = (
-        f"📝 Yangi test natijasi:\n\n"
-        f"👧 Farzand: {child_name}\n"
-        f"👨‍👩‍👧 Ota/onasi: {parent_name}\n"
-        f"🌍 Hudud: {region} - {district} - {mahalla}\n"
-        f"🎂 Yosh: {age}\n"
-        f"📞 Telefon: {phone}\n\n"
-        f"✅ To‘g‘ri javoblar: {correct} / {total}\n"
-        f"📊 Natija: {percent}%\n\n"
-        f"🕒 Vaqt: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-    )
-    for admin_id in ADMIN_IDS:
-        await bot.send_message(admin_id, result_msg)
-
-    # Testni tozalash
-    ACTIVE_TESTS.pop(user_id, None)
-
-# -------------- Admin uchun test yuklash --------------
-
-@dp.message_handler(lambda message: message.text == "🆕 Test yuklash", user_id=ADMIN_IDS)
-async def admin_upload_test(message: types.Message):
-    await message.answer("📤 Iltimos, test faylini matn (.txt) formatida yuboring.")
-
-    # State boshqarish uchun qo'shimcha kerak bo'lsa, qo'shish mumkin
-
-@dp.message_handler(content_types=types.ContentType.DOCUMENT, user_id=ADMIN_IDS)
-async def admin_receive_test_file(message: types.Message):
-    doc = message.document
-    if not doc.file_name.endswith(".txt"):
-        await message.answer("❗ Iltimos, faqat matn (.txt) formatidagi faylni yuboring.")
-        return
-
-    file_path = await doc.download()
-    await message.answer(f"✅ Fayl qabul qilindi: {doc.file_name}")
-
-    # Faylni saqlash va keyin test fayliga ko‘chirish
-    if "7_10" in doc.file_name:
-        os.rename(file_path.name, "test_7_10.txt")
-    elif "11_14" in doc.file_name:
-        os.rename(file_path.name, "test_11_14.txt")
-    else:
-        await message.answer("❗ Fayl nomida yosh guruh ko‘rsatilmagan (7_10 yoki 11_14).")
-        return
-
-    await message.answer("✅ Test fayli saqlandi va ishga tayyor.")
-
-# -------------- Foydalanuvchilar ro‘yxati --------------
-
-@dp.message_handler(lambda message: message.text == "📋 Foydalanuvchilar ro‘yxati", user_id=ADMIN_IDS)
-async def admin_show_users(message: types.Message):
-    users = get_all_users()
-    if not users:
-        await message.answer("👤 Hozircha foydalanuvchi yo‘q.")
-        return
-    text = "👤 Ro‘yxatdan o‘tgan foydalanuvchilar:\n\n"
-    for u in users:
-        text += f"ID: {u[0]}\nFarzand: {u[1]}\nOta/onasi: {u[2]}\nHudud: {u[3]}-{u[4]}-{u[5]}\nYosh: {u[6]}\nTelefon: {u[7]}\n\n"
-    await message.answer(text)
-
-# -------------- Asosiy menyuga qaytish --------------
-
-@dp.message_handler(lambda message: message.text == "⬅ Asosiy menyu", user_id=ADMIN_IDS)
-async def admin_back_to_main(message: types.Message):
-    await message.answer("🔙 Asosiy menyuga qaytildi.", reply_markup=admin_menu)
-
-@dp.message_handler(lambda message: message.text == "📚 Loyiha haqida")
-async def about_project(message: types.Message):
-    about_text = (
-        "📚 Kitobxon Kids loyihasi haqida:\n\n"
-        "1. 7-10 yosh bolalar uchun testlar mavjud.\n"
-        "2. 11-14 yosh toifasi qo‘shildi.\n"
-        "3. Foydalanuvchi ma’lumotlari xavfsiz saqlanadi.\n"
-        "4. Fikr-mulohazalaringizni kutamiz.\n"
-        "5. Loyihani doimiy yangilab boramiz.\n"
-    )
-    await message.answer(about_text)
-
-@dp.message_handler(lambda message: message.text == "💬 Fikr va maslahatlar")
-async def feedback_start(message: types.Message):
-    await message.answer("💬 Fikringizni kiriting:")
-    await Registration.feedback.set()
-
-@dp.message_handler(state=Registration.feedback)
-async def feedback_receive(message: types.Message, state: FSMContext):
-    feedback = message.text.strip()
-    if len(feedback) < 3:
-        await message.answer("❗ Iltimos, aniq va qisqa fikr kiriting.")
-        return
-    for admin_id in ADMIN_IDS:
-        await bot.send_message(admin_id, f"💬 Fikr-mulohaza:\n\n{feedback}\n\nFoydalanuvchi: {message.from_user.full_name} (ID: {message.from_user.id})")
-    await message.answer("✅ Fikringiz uchun rahmat!", reply_markup=menu)
-    await state.finish()
-
-# -------------- RUN BOT --------------
-
+# ---------- BOTNI ISHGA TAYYORLASH ----------
 if __name__ == '__main__':
     init_db()
     executor.start_polling(dp, skip_updates=True)
-
-
