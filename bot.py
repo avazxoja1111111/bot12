@@ -34,7 +34,7 @@ except ImportError:
 
 # 🔑 Configuration
 TOKEN = os.getenv("BOT_TOKEN", "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk")
-SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID", "6578706277, 7853664401"))
+SUPER_ADMIN_ID = [int(x) for x in os.getenv("SUPER_ADMIN_ID", "6578706277,7853664401").split(",")]
 CHANNEL_USERNAME = "@Kitobxon_Kids"
 
 # 🛠 Logging
