@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.client.default import DefaultBotProperties
 
 # 🔑 Token va Admin ID-lar
-TOKEN = "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk"
+TOKEN = "7570796885:AAHHfpXanemNYvW"
 ADMIN_IDS = [6578706277, 7853664401]
 CHANNEL_USERNAME = "@Kitobxon_Kids"
 
