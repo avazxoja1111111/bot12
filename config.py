@@ -1,2 +1,2 @@
-BOT_TOKEN = "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk"
+BOT_TOKEN = ""
 ADMIN_IDS = [6578706277, 7853664401]  # O'zingizning Telegram ID'ingiz
