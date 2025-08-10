@@ -1015,43 +1015,44 @@ async def save_feedback(message: types.Message, state: FSMContext):
 # 📚 Project info
 @dp.message(lambda message: message.text == "📚 Loyiha haqida")
 async def project_info(message: types.Message):
-    text = """<b>"Kitobxon kids" tanlovini tashkil etish va o'tkazish to'g'risidagi NIZOM</b>
+    text = """
+🏆 <b>"Kitobxon kids" tanlovini tashkil etish va o'tkazish to'g'risidagi NIZOM</b>
 
-🔹 <b>Umumiy qoidalar:</b>
+📚 <b>Umumiy qoidalar:</b>
 • Mazkur Nizom yoshlar o'rtasida "Kitobxon Kids" tanlovini o'tkazish tartibini belgilaydi.
 • Tanlov 7–10 va 11–14 yoshdagi bolalar uchun mo'ljallangan.
 • Tanlov kitobxonlik madaniyatini oshirishga qaratilgan.
 
-🔹 <b>Tashkilotchilar:</b>
+🤝 <b>Tashkilotchilar:</b>
 • Yoshlar ishlari agentligi,
 • Maktabgacha va maktab ta'limi vazirligi,
 • O'zbekiston bolalar tashkiloti.
 
-🔹 <b>Ishtirokchilar:</b>
+👥 <b>Ishtirokchilar:</b>
 • 7–14 yoshdagi barcha bolalar qatnasha oladi.
 • Qoraqalpoq va rus tillarida ham qatnashish mumkin.
 
-🔹 <b>Maqsad va vazifalar:</b>
+🎯 <b>Maqsad va vazifalar:</b>
 • Kitob o'qishga qiziqish uyg'otish, mustaqil o'qish ko'nikmasini shakllantirish.
 • Adiblar merosini o'rganish, o'zlikni anglashga chorlash.
 
-🔹 <b>Tanlov bosqichlari:</b>
-1. Saralash (oy boshida test, 25 ta savol, har biri 4 ball).
-2. Hududiy (30 ta savol, har biri 30 soniya, top scorer keyingi bosqichga o'tadi).
-3. Respublika (Fantaziya festivali, Taassurotlar, Savollar - 100 ballik tizim).
+🗓️ <b>Tanlov bosqichlari:</b>
+1️⃣ <b>Saralash:</b> Oy boshida test, 25 ta savol, har biri 4 ball.
+2️⃣ <b>Hududiy:</b> 30 ta savol, har biri 30 soniya, eng ko'p ball olgan keyingi bosqichga o'tadi.
+3️⃣ <b>Respublika:</b> Fantaziya festivali, Taassurotlar, Savollar (100 ballik tizim).
 
-🔹 <b>G'oliblar:</b>
-• 1-o'rin: Noutbuk
-• 2-o'rin: Planshet
-• 3-o'rin: Telefon
-• Barcha qatnashchilarga velosiped
+🎁 <b>G'oliblar:</b>
+🥇 <b>1-o'rin:</b> Noutbuk
+🥈 <b>2-o'rin:</b> Planshet
+🥉 <b>3-o'rin:</b> Telefon
+🚲 Barcha respublika bosqichi qatnashchilariga velosiped.
 
-🔹 <b>Moliya manbalari:</b>
+💰 <b>Moliya manbalari:</b>
 • Agentlik mablag'lari, homiylar, qonuniy xayriyalar.
 
-Batafsil: @Kitobxon_Kids kanali orqali kuzatib boring.
+📲 Batafsil ma'lumotlar: @Kitobxon_Kids kanali orqali kuzatib boring!
 """
-    await message.answer(text)
+    await message.answer(text, parse_mode=ParseMode.HTML)
 
 # 🔙 Back to main menu
 @dp.message(lambda message: message.text == "🔙 Asosiy menyu")
