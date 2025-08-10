@@ -33,7 +33,7 @@ except ImportError:
     print("Required libraries not installed. Install with: pip install reportlab openpyxl PyPDF2")
 
 # 🔑 Configuration
-TOKEN = os.getenv("BOT_TOKEN", "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk")
+TOKEN = os.getenv("BOT_TOKEN", "")
 SUPER_ADMIN_ID = [int(x) for x in os.getenv("SUPER_ADMIN_ID", "6578706277,7853664401").split(",")]
 CHANNEL_USERNAME = "@Kitobxon_Kids"
 
