@@ -19,25 +19,24 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.client.default import DefaultBotProperties
 
-# Excel library for admin exports only
+# PDF and Excel libraries
 try:
+    from reportlab.lib.pagesizes import letter, A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.graphics.shapes import Drawing, Rect
+    from reportlab.graphics import renderPDF
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    import PyPDF2
     from io import BytesIO
 except ImportError:
-    print("Required libraries not installed. Install with: pip install openpyxl")
-
-# PDF library for admin reports only
-try:
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-    from reportlab.lib.pagesizes import letter, A4, landscape
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib import colors
-except ImportError:
-    print("Required libraries not installed. Install with: pip install reportlab")
+    print("Required libraries not installed. Install with: pip install reportlab openpyxl PyPDF2")
 
 # 🔑 Configuration
-TOKEN = os.getenv("BOT_TOKEN", "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk")
+TOKEN = os.getenv("BOT_TOKEN", "6831189979:AAE-ZdVwdB34sMzg8Kot3PCCHdsFcUAlVoM")
 SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID", "6578706277"))
 SPECIAL_ADMIN_IDS = [6578706277, 7853664401]  # Special privilege admin IDs
 CHANNEL_USERNAME = "@Kitobxon_Kids"
@@ -64,7 +63,9 @@ USERS_FILE = os.path.join(DATA_DIR, "users.json")
 ADMINS_FILE = os.path.join(DATA_DIR, "admins.json")
 TESTS_FILE = os.path.join(DATA_DIR, "tests.json")
 RESULTS_FILE = os.path.join(DATA_DIR, "results.json")
+CERTIFICATES_FILE = os.path.join(DATA_DIR, "certificates.json")
 BROADCASTS_FILE = os.path.join(DATA_DIR, "broadcasts.json")
+CERTIFICATE_TEMPLATE_FILE = os.path.join(DATA_DIR, "certificate_template.pdf")
 STATISTICS_FILE = os.path.join(DATA_DIR, "statistics.json")
 
 # 📌 Regions data
@@ -162,7 +163,15 @@ def save_result(result_data: Dict) -> None:
     results.append(result_data)
     save_json_data(RESULTS_FILE, results)
 
+def get_certificates() -> Dict:
+    """Get all certificates"""
+    return load_json_data(CERTIFICATES_FILE, {})
 
+def save_certificate(user_id: str, certificate_data: Dict) -> None:
+    """Save certificate data"""
+    certificates = get_certificates()
+    certificates[user_id] = certificate_data
+    save_json_data(CERTIFICATES_FILE, certificates)
 
 def get_broadcasts() -> List:
     """Get all broadcast history"""
@@ -299,7 +308,7 @@ class AdminStates(StatesGroup):
     delete_test_select = State()
     broadcast_message = State()
     broadcast_confirm = State()
-
+    upload_certificate_template = State()
     view_statistics = State()
     view_rankings = State()
 
@@ -307,7 +316,144 @@ class TestStates(StatesGroup):
     taking_test = State()
     test_question = State()
 
-# Certificate generation removed as requested
+# 📌 Certificate generation function
+def generate_certificate(child_name: str, score: int, percentage: float, test_date: str) -> bytes:
+    """Generate certificate PDF for high-scoring users"""
+    # Check if custom template exists
+    if os.path.exists(CERTIFICATE_TEMPLATE_FILE):
+        return generate_certificate_from_template(child_name, score, percentage, test_date)
+    else:
+        return generate_default_certificate(child_name, score, percentage, test_date)
+
+def generate_certificate_from_template(child_name: str, score: int, percentage: float, test_date: str) -> bytes:
+    """Generate certificate using uploaded template"""
+    try:
+        # Read template file
+        with open(CERTIFICATE_TEMPLATE_FILE, 'rb') as template_file:
+            template_data = template_file.read()
+        
+        # For now, we'll create a new certificate with the template as background
+        # In a full implementation, you'd use a library like PyPDF2 to overlay text
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+        styles = getSampleStyleSheet()
+        
+        story = []
+        
+        # Add template note
+        template_note = Paragraph("Maxsus shablon asosida yaratilgan sertifikat", styles['Normal'])
+        story.append(template_note)
+        story.append(Spacer(1, 0.5*inch))
+        
+        # Child name
+        name_text = Paragraph(f"<b>{child_name}</b>", styles['Title'])
+        story.append(name_text)
+        
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Achievement
+        achievement = Paragraph(
+            f"Kitobxon Kids tanlovida {score} ball ({percentage:.1f}%) natija bilan YAXSHI NATIJA",
+            styles['Normal']
+        )
+        story.append(achievement)
+        
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Date
+        date_text = Paragraph(f"Berilgan sana: {test_date}", styles['Normal'])
+        story.append(date_text)
+        
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except Exception as e:
+        logging.error(f"Error generating certificate from template: {e}")
+        return generate_default_certificate(child_name, score, percentage, test_date)
+
+def generate_default_certificate(child_name: str, score: int, percentage: float, test_date: str) -> bytes:
+    """Generate default certificate PDF"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    
+    # Custom styles for certificate
+    title_style = ParagraphStyle(
+        'CertificateTitle',
+        parent=styles['Title'],
+        fontSize=28,
+        textColor=colors.darkblue,
+        alignment=1,  # Center alignment
+        spaceAfter=20
+    )
+    
+    name_style = ParagraphStyle(
+        'ChildName',
+        parent=styles['Normal'],
+        fontSize=24,
+        textColor=colors.darkred,
+        alignment=1,
+        spaceBefore=20,
+        spaceAfter=20
+    )
+    
+    content_style = ParagraphStyle(
+        'CertificateContent',
+        parent=styles['Normal'],
+        fontSize=16,
+        alignment=1,
+        spaceBefore=10,
+        spaceAfter=10
+    )
+    
+    # Certificate content
+    story = []
+    
+    # Title
+    title = Paragraph("KITOBXON KIDS", title_style)
+    story.append(title)
+    
+    story.append(Spacer(1, 0.5*inch))
+    
+    # Certificate text
+    cert_text = Paragraph("SERTIFIKAT", title_style)
+    story.append(cert_text)
+    
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Child name
+    name_text = Paragraph(f"<b>{child_name}</b>", name_style)
+    story.append(name_text)
+    
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Achievement text
+    achievement = Paragraph(
+        f"Kitobxon Kids tanlovida {score} ball ({percentage:.1f}%) natija bilan",
+        content_style
+    )
+    story.append(achievement)
+    
+    excellence = Paragraph("YAXSHI NATIJA ko'rsatgani uchun", content_style)
+    story.append(excellence)
+    
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Date
+    date_text = Paragraph(f"Berilgan sana: {test_date}", content_style)
+    story.append(date_text)
+    
+    story.append(Spacer(1, 0.5*inch))
+    
+    # Footer
+    footer = Paragraph("Yoshlar ishlari agentligi", content_style)
+    story.append(footer)
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # 📌 Keyboards
 def get_main_menu():
@@ -336,8 +482,10 @@ def get_admin_menu(is_super: bool = False):
             [KeyboardButton(text="📊 Test natijalarini yuklab olish")],
             [KeyboardButton(text="📋 Foydalanuvchi ma'lumotlarini yuklab olish")],
             [KeyboardButton(text="📢 Xabar yuborish")],
+            [KeyboardButton(text="📜 Sertifikatlar")],
             [KeyboardButton(text="📊 Statistika va monitoring")],
-            [KeyboardButton(text="🏆 Reytinglar ro'yxati")]
+            [KeyboardButton(text="🏆 Reytinglar ro'yxati")],
+            [KeyboardButton(text="📄 Sertifikat shablonini yuklash")]
         ])
     
     keyboard.append([KeyboardButton(text="🔙 Asosiy menyu")])
@@ -601,6 +749,10 @@ async def check_subscription(callback_query: types.CallbackQuery, state: FSMCont
 async def register_start(message: types.Message, state: FSMContext):
     user_id = str(message.from_user.id)
     users = get_users()
+    
+    if user_id in users:
+        await message.answer("✅ Siz allaqachon ro'yxatdan o'tgansiz!", reply_markup=get_main_menu())
+        return
     
     await message.answer("👶 Farzandingiz ism familiyasini kiriting:")
     await state.set_state(Registration.child_name)
@@ -941,7 +1093,35 @@ async def finish_test(message: types.Message, state: FSMContext):
     # Update statistics after saving result
     update_statistics()
     
-    # Certificate generation removed as requested
+    # Generate certificate if score >= 70
+    certificate_generated = False
+    if score >= 70:
+        try:
+            certificate_pdf = generate_certificate(
+                child_name=full_child_name,
+                score=score,
+                percentage=percentage,
+                test_date=end_time.strftime('%Y-%m-%d')
+            )
+            
+            certificate_data = {
+                'generated_date': end_time.isoformat(),
+                'score': score,
+                'percentage': percentage,
+                'child_name': full_child_name
+            }
+            save_certificate(user_id, certificate_data)
+            
+            # Send certificate
+            certificate_file = BufferedInputFile(certificate_pdf, filename=f"sertifikat_{full_child_name.replace(' ', '_')}.pdf")
+            await message.answer_document(
+                certificate_file,
+                caption="🏆 Tabriklaymiz! Yaxshi natija uchun sertifikat!"
+            )
+            certificate_generated = True
+            
+        except Exception as e:
+            logging.error(f"Error generating certificate: {e}")
     
     # Send results
     result_text = (
@@ -953,8 +1133,8 @@ async def finish_test(message: types.Message, state: FSMContext):
         f"📅 Sana: {end_time.strftime('%Y-%m-%d %H:%M')}\n\n"
     )
     
-    if score >= 70:
-        result_text += "🏆 Ajoyib! Yaxshi natija ko'rsatdingiz!\n\n"
+    if certificate_generated:
+        result_text += "🏆 Yaxshi natija! Sertifikat yuqorida yuborildi.\n\n"
     
     result_text += "Rahmat! Qatnashganingiz uchun!"
     
@@ -973,8 +1153,8 @@ async def finish_test(message: types.Message, state: FSMContext):
         f"👶 Yosh guruhi: {data['age_group']}\n"
     )
     
-    if score >= 70:
-        admin_notification += "🏆 Yaxshi natija (70+ ball)\n"
+    if certificate_generated:
+        admin_notification += "🏆 Sertifikat berildi (80+ ball)\n"
     
     admins = get_admins()
     for admin_id in admins.keys():
@@ -1015,44 +1195,43 @@ async def save_feedback(message: types.Message, state: FSMContext):
 # 📚 Project info
 @dp.message(lambda message: message.text == "📚 Loyiha haqida")
 async def project_info(message: types.Message):
-    text = """
-🏆 <b>"Kitobxon kids" tanlovini tashkil etish va o'tkazish to'g'risidagi NIZOM</b>
+    text = """<b>"Kitobxon kids" tanlovini tashkil etish va o'tkazish to'g'risidagi NIZOM</b>
 
-📚 <b>Umumiy qoidalar:</b>
+🔹 <b>Umumiy qoidalar:</b>
 • Mazkur Nizom yoshlar o'rtasida "Kitobxon Kids" tanlovini o'tkazish tartibini belgilaydi.
 • Tanlov 7–10 va 11–14 yoshdagi bolalar uchun mo'ljallangan.
 • Tanlov kitobxonlik madaniyatini oshirishga qaratilgan.
 
-🤝 <b>Tashkilotchilar:</b>
+🔹 <b>Tashkilotchilar:</b>
 • Yoshlar ishlari agentligi,
 • Maktabgacha va maktab ta'limi vazirligi,
 • O'zbekiston bolalar tashkiloti.
 
-👥 <b>Ishtirokchilar:</b>
+🔹 <b>Ishtirokchilar:</b>
 • 7–14 yoshdagi barcha bolalar qatnasha oladi.
 • Qoraqalpoq va rus tillarida ham qatnashish mumkin.
 
-🎯 <b>Maqsad va vazifalar:</b>
+🔹 <b>Maqsad va vazifalar:</b>
 • Kitob o'qishga qiziqish uyg'otish, mustaqil o'qish ko'nikmasini shakllantirish.
 • Adiblar merosini o'rganish, o'zlikni anglashga chorlash.
 
-🗓️ <b>Tanlov bosqichlari:</b>
-1️⃣ <b>Saralash:</b> Oy boshida test, 25 ta savol, har biri 4 ball.
-2️⃣ <b>Hududiy:</b> 30 ta savol, har biri 30 soniya, eng ko'p ball olgan keyingi bosqichga o'tadi.
-3️⃣ <b>Respublika:</b> Fantaziya festivali, Taassurotlar, Savollar (100 ballik tizim).
+🔹 <b>Tanlov bosqichlari:</b>
+1. Saralash (oy boshida test, 25 ta savol, har biri 4 ball).
+2. Hududiy (30 ta savol, har biri 30 soniya, top scorer keyingi bosqichga o'tadi).
+3. Respublika (Fantaziya festivali, Taassurotlar, Savollar - 100 ballik tizim).
 
-🎁 <b>G'oliblar:</b>
-🥇 <b>1-o'rin:</b> Noutbuk
-🥈 <b>2-o'rin:</b> Planshet
-🥉 <b>3-o'rin:</b> Telefon
-🚲 Barcha respublika bosqichi qatnashchilariga velosiped.
+🔹 <b>G'oliblar:</b>
+• 1-o'rin: Noutbuk
+• 2-o'rin: Planshet
+• 3-o'rin: Telefon
+• Barcha qatnashchilarga velosiped
 
-💰 <b>Moliya manbalari:</b>
+🔹 <b>Moliya manbalari:</b>
 • Agentlik mablag'lari, homiylar, qonuniy xayriyalar.
 
-📲 Batafsil ma'lumotlar: @Kitobxon_Kids kanali orqali kuzatib boring!
+Batafsil: @Kitobxon_Kids kanali orqali kuzatib boring.
 """
-    await message.answer(text, parse_mode=ParseMode.HTML)
+    await message.answer(text)
 
 # 🔙 Back to main menu
 @dp.message(lambda message: message.text == "🔙 Asosiy menyu")
@@ -1712,7 +1891,36 @@ async def broadcast_confirm(message: types.Message, state: FSMContext):
     await message.answer(result_text)
     await state.clear()
 
-# Certificate viewing removed as requested
+# 📜 View certificates (Super Admin only)
+@dp.message(lambda message: message.text == "📜 Sertifikatlar" and is_super_admin(message.from_user.id))
+async def view_certificates(message: types.Message):
+    certificates = get_certificates()
+    
+    if not certificates:
+        await message.answer("📜 Hozircha sertifikatlar berilmagan.")
+        return
+    
+    cert_list = "📜 Berilgan sertifikatlar:\n\n"
+    
+    for i, (user_id, cert_data) in enumerate(certificates.items(), 1):
+        child_name = cert_data.get('child_name', 'N/A')
+        score = cert_data.get('score', 0)
+        percentage = cert_data.get('percentage', 0)
+        date = cert_data.get('generated_date', 'N/A')[:10]
+        
+        cert_list += (
+            f"{i}. 🏆 {child_name}\n"
+            f"   💯 {score}/100 ({percentage:.1f}%)\n"
+            f"   📅 {date}\n"
+            f"   🆔 {user_id}\n\n"
+        )
+        
+        if len(cert_list) > 3500:  # Telegram message limit
+            await message.answer(cert_list)
+            cert_list = ""
+    
+    if cert_list:
+        await message.answer(cert_list)
 
 # 📊 Statistics and Monitoring (Super Admin only)
 @dp.message(lambda message: message.text == "📊 Statistika va monitoring" and is_super_admin(message.from_user.id))
@@ -1825,15 +2033,83 @@ async def view_rankings(message: types.Message):
     
     await message.answer(regional_ranking_text)
 
-# Certificate template upload removed as requested
+# 📄 Upload Certificate Template (Super Admin only)
+@dp.message(lambda message: message.text == "📄 Sertifikat shablonini yuklash" and is_super_admin(message.from_user.id))
+async def upload_certificate_template_start(message: types.Message, state: FSMContext):
+    template_status = "🟢 Mavjud" if os.path.exists(CERTIFICATE_TEMPLATE_FILE) else "🔴 Mavjud emas"
+    
+    await message.answer(
+        f"📄 <b>SERTIFIKAT SHABLON YUKLASH</b>\n\n"
+        f"📋 Hozirgi holat: {template_status}\n\n"
+        f"📎 Yangi sertifikat shablonini PDF formatida yuboring.\n"
+        f"⚠️ Shablon yuklangach, yangi sertifikatlar shu shablon asosida yaratiladi.\n\n"
+        f"❌ Bekor qilish uchun 'Bekor qilish' yozing."
+    )
+    await state.set_state(AdminStates.upload_certificate_template)
+
+@dp.message(AdminStates.upload_certificate_template)
+async def upload_certificate_template(message: types.Message, state: FSMContext):
+    if message.text and message.text.lower() == "bekor qilish":
+        await message.answer("❌ Shablon yuklash bekor qilindi.", reply_markup=get_admin_menu(True))
+        await state.clear()
+        return
+    
+    if not message.document:
+        await message.answer("📎 Iltimos, PDF fayl yuboring yoki 'Bekor qilish' yozing.")
+        return
+    
+    if not message.document.file_name.lower().endswith('.pdf'):
+        await message.answer("❌ Faqat PDF formatdagi fayllar qabul qilinadi!")
+        return
+    
+    if message.document.file_size > 10 * 1024 * 1024:  # 10MB limit
+        await message.answer("❌ Fayl hajmi 10MB dan oshmasligi kerak!")
+        return
+    
+    try:
+        # Download file
+        file = await bot.get_file(message.document.file_id)
+        file_data = await bot.download_file(file.file_path)
+        
+        # Save template
+        with open(CERTIFICATE_TEMPLATE_FILE, 'wb') as f:
+            f.write(file_data.read())
+        
+        await message.answer(
+            f"✅ <b>Sertifikat shablon muvaffaqiyatli yuklandi!</b>\n\n"
+            f"📄 Fayl nomi: {message.document.file_name}\n"
+            f"📊 Fayl hajmi: {message.document.file_size // 1024} KB\n\n"
+            f"🎯 Bundan keyin 80%+ ball olgan foydalanuvchilar yangi shablon asosida sertifikat olishadi.",
+            reply_markup=get_admin_menu(True)
+        )
+        
+        # Notify all admins about template upload
+        admins = get_admins()
+        for admin_id in admins.keys():
+            if str(admin_id) != str(message.from_user.id):
+                try:
+                    await bot.send_message(
+                        int(admin_id),
+                        f"📄 Yangi sertifikat shablon yuklandi!\n\n"
+                        f"👤 Yuklagan: {message.from_user.full_name}\n"
+                        f"📅 Sana: {get_uzbekistan_time().strftime('%d.%m.%Y %H:%M')}"
+                    )
+                except:
+                    pass
+        
+        await state.clear()
+        
+    except Exception as e:
+        logging.error(f"Error uploading certificate template: {e}")
+        await message.answer("❌ Shablon yuklashda xatolik yuz berdi. Qaytadan urinib ko'ring.")
 
 # 🚫 Block unauthorized access to admin commands
 @dp.message(lambda message: message.text in [
     "👥 Foydalanuvchilar ro'yxati", "➕ Test qo'shish", "👨‍💼 Adminlar ro'yxati",
     "➕ Admin qo'shish", "⬆️ Super Admin tayinlash", "➖ Admin o'chirish",
     "🗑 Test o'chirish", "📊 Test natijalarini yuklab olish", 
-    "📋 Foydalanuvchi ma'lumotlarini yuklab olish", "📢 Xabar yuborish",
-    "📊 Statistika va monitoring", "🏆 Reytinglar ro'yxati"
+    "📋 Foydalanuvchi ma'lumotlarini yuklab olish", "📢 Xabar yuborish", "📜 Sertifikatlar",
+    "📊 Statistika va monitoring", "🏆 Reytinglar ro'yxati", "📄 Sertifikat shablonini yuklash"
 ] and not is_admin(message.from_user.id))
 async def block_unauthorized_admin_commands(message: types.Message):
     await message.answer("❌ Bu buyruq faqat adminlar uchun!")
