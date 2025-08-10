@@ -38,7 +38,10 @@ except ImportError:
 
 # 🔑 Configuration
 TOKEN = os.getenv("BOT_TOKEN", "7570796885:AAHHfpXanemNYvW-wVT2Rv40U0xq-XjxSwk")
-SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID", "6578706277"))
+SUPER_ADMIN_IDS = [
+    int(os.getenv("SUPER_ADMIN_ID_1", "6578706277")),
+    int(os.getenv("SUPER_ADMIN_ID_2", "7853664401"))
+]
 SPECIAL_ADMIN_IDS = [6578706277, 7853664401]  # Special privilege admin IDs
 CHANNEL_USERNAME = "@Kitobxon_Kids"
 
