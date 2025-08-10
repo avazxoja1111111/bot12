@@ -602,10 +602,6 @@ async def register_start(message: types.Message, state: FSMContext):
     user_id = str(message.from_user.id)
     users = get_users()
     
-    if user_id in users:
-        await message.answer("✅ Siz allaqachon ro'yxatdan o'tgansiz!", reply_markup=get_main_menu())
-        return
-    
     await message.answer("👶 Farzandingiz ism familiyasini kiriting:")
     await state.set_state(Registration.child_name)
 
