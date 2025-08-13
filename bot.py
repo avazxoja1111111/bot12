@@ -60,7 +60,7 @@ except ImportError:
 # Bot configuration
 BOT_TOKEN = os.getenv("7570796885:AAFkj7iY05fQUG21015viY7Gy8ifXXcnOpA")
 if not BOT_TOKEN:
-    raise ValueError("7570796885:AAFkj7iY05fQUG21015viY7Gy8ifXXcnOpA")
+    raise ValueError("BOT_TOKEN environment variable is required")
 
 # Data directory
 DATA_DIR = Path("bot_data")
