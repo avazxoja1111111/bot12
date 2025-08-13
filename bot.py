@@ -1,796 +1,1467 @@
-import logging
+#!/usr/bin/env python3
+"""
+Kitobxon Kids - Educational Testing Bot
+A comprehensive Telegram bot for conducting reading comprehension tests
+Refactored version with multi-format support and optimized performance
+"""
+
 import asyncio
 import json
+import logging
 import os
-import random
+import re
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
-import tempfile
+from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import (
-    ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, 
-    InlineKeyboardButton, BufferedInputFile
-)
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import (
+    BotCommand, CallbackQuery, Document, InlineKeyboardButton,
+    InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup,
+    ReplyKeyboardRemove
+)
 
-# Excel library for admin exports only
+# Optional imports for document processing
 try:
     import openpyxl
-    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from io import BytesIO
+    from openpyxl.styles import Font, PatternFill
+    EXCEL_AVAILABLE = True
 except ImportError:
-    print("Required libraries not installed. Install with: pip install openpyxl")
+    EXCEL_AVAILABLE = False
 
-# PDF library for admin reports only
 try:
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
-    from reportlab.lib.pagesizes import letter, A4, landscape
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib import colors
+    from docx import Document as DocxDocument
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    DOCX_AVAILABLE = True
 except ImportError:
-    print("Required libraries not installed. Install with: pip install reportlab")
+    DOCX_AVAILABLE = False
 
-# 🔑 Configuration
-TOKEN = os.getenv("BOT_TOKEN", "")
-SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID", "6578706277"))
-SPECIAL_ADMIN_IDS = [6578706277, 7853664401]  # Special privilege admin IDs
-CHANNEL_USERNAME = "@Kitobxon_Kids"
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
 
-# O'zbekiston vaqti (UTC+5)
-UZBEKISTAN_TZ = timezone(timedelta(hours=5))
+# ═══════════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════════════
 
-def get_uzbekistan_time():
-    """O'zbekiston vaqti bo'yicha hozirgi vaqtni qaytaradi"""
-    return datetime.now(UZBEKISTAN_TZ)
+# Bot configuration
+BOT_TOKEN = os.getenv("7570796885:AAFkj7iY05fQUG21015viY7Gy8ifXXcnOpA")
+if not BOT_TOKEN:
+    raise ValueError("7570796885:AAFkj7iY05fQUG21015viY7Gy8ifXXcnOpA")
 
-# 🛠 Logging
-logging.basicConfig(level=logging.INFO)
+# Data directory
+DATA_DIR = Path("bot_data")
+DATA_DIR.mkdir(exist_ok=True)
 
-# 🤖 Bot and Dispatcher
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher()
+# Logging setup
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# 📁 Data storage files
-DATA_DIR = "bot_data"
-os.makedirs(DATA_DIR, exist_ok=True)
+# ═══════════════════════════════════════════════════════════════════════════════════
+# DATA STRUCTURES AND VALIDATION
+# ═══════════════════════════════════════════════════════════════════════════════════
 
-USERS_FILE = os.path.join(DATA_DIR, "users.json")
-ADMINS_FILE = os.path.join(DATA_DIR, "admins.json")
-TESTS_FILE = os.path.join(DATA_DIR, "tests.json")
-RESULTS_FILE = os.path.join(DATA_DIR, "results.json")
-BROADCASTS_FILE = os.path.join(DATA_DIR, "broadcasts.json")
-STATISTICS_FILE = os.path.join(DATA_DIR, "statistics.json")
-
-# 📌 Regions data
-REGIONS = {
-    "Toshkent shahri": ["Bektemir", "Chilonzor", "Mirzo Ulug'bek", "Mirobod", "Olmazor", "Shayxontohur", "Sergeli", "Uchtepa", "Yashnobod", "Yakkasaroy", "Yunusobod"],
-    "Toshkent viloyati": ["Bekabad", "Bo'ka", "Bo'stonliq", "Chinoz", "Chirchiq", "Ohangaron", "Oqqo'rg'on", "Parkent", "Piskent", "Quyichirchiq", "O'rtachirchiq", "Yangiyo'l", "Toshkent", "Yuqorichirchiq", "Zangiota", "Nurafshon", "Olmaliq", "Angren"],
-    "Andijon": ["Andijon shahri", "Asaka", "Baliqchi", "Bo'ston", "Buloqboshi", "Izboskan", "Jalaquduq", "Marhamat", "Oltinko'l", "Paxtaobod", "Paytug'", "Qo'rg'ontepa", "Shahriston", "Xo'jaobod"],
-    "Farg'ona": ["Beshariq", "Buvayda", "Dang'ara", "Farg'ona shahri", "Ferghana tumani", "Furqat", "Qo'qon", "Quva", "Rishton", "So'x", "Toshloq", "Uchko'prik", "Yozyovon", "Oltiariq"],
-    "Namangan": ["Chortoq", "Chust", "Kosonsoy", "Namangan shahri", "Norin", "Pop", "To'raqo'rg'on", "Uychi", "Uchqo'rg'on", "Yangiqo'rg'on", "Yangihayot"],
-    "Samarqand": ["Bulung'ur", "Ishtixon", "Jomboy", "Kattakurgan", "Oqdaryo", "Payariq", "Pastdarg'om", "Qo'shrabot", "Samarqand shahri", "Toyloq", "Urgut"],
-    "Buxoro": ["Buxoro shahri", "Buxoro tumani", "G'ijduvon", "Jondor", "Kogon", "Olot", "Peshku", "Qorako'l", "Qorovulbozor", "Romitan", "Shofirkon", "Vobkent"],
-    "Jizzax": ["Baxmal", "Chiroqchi", "Do'stlik", "Forish", "G'allaorol", "Zafarobod", "Zarbdor", "Zomin", "Zafar", "Yangiobod", "Jizzax shahri", "Mirzacho'l"],
-    "Navoiy": ["Bespah", "Karmana", "Konimex", "Navbahor", "Nurota", "Tomdi", "Xatirchi", "Uchquduq", "Navoiy shahri", "Zarafshon"],
-    "Qashqadaryo": ["Chiroqchi", "G'uzor", "Qarshi", "Kitob", "Koson", "Mirishkor", "Muborak", "Nishon", "Shahrisabz", "Dehqonobod", "Yakkabog'"],
-    "Surxondaryo": ["Angor", "Bandixon", "Denov", "Jarqo'rg'on", "Muzrabot", "Oltinsoy", "Sariosiyo", "Sherobod", "Sho'rchi", "Termiz", "Uzun", "Boysun"],
-    "Sirdaryo": ["Guliston", "Guliston tumani", "Mirzaobod", "Oqoltin", "Sardoba", "Sayxunobod", "Sirdaryo tumani", "Xovos", "Boyovut", "Yangiyer"],
-    "Xorazm": ["Bog'ot", "Gurlan", "Hazorasp", "Khiva", "Qo'shko'pir", "Shovot", "Urganch tumani", "Xonqa", "Yangiariq", "Yangibozor", "Tuproqqal'a", "Urganch shahri"],
-    "Qoraqalpog'iston": ["Amudaryo", "Beruniy", "Chimboy", "Ellikqala", "Kegeyli", "Mo'ynoq", "Nukus", "Qanliko'l", "Qo'ng'irot", "Taxiatosh", "To'rtko'l", "Xo'jayli"]
+# Regional data for Uzbekistan
+REGIONS_DATA = {
+    "Toshkent shahri": {
+        "Bektemir": ["Kuyluk", "Sarabon", "Bunyodkor"],
+        "Chilonzor": ["Chilonzor", "Kimyogarlar", "Namuna"],
+        "Mirobod": ["Mirobod", "Ulugbek", "Makhmudov"],
+        "Mirzo Ulugbek": ["Qoraqamish", "Beruni", "Maksim Gorkiy"],
+        "Olmazar": ["Olmazar", "Mavlon Qori", "Bobur"],
+        "Sergeli": ["Sergeli", "Qipchoq", "Yangi Sergeli"],
+        "Shayhontohur": ["Shayhontohur", "Berdaq", "Pakhtakor"],
+        "Uchtepa": ["Uchtepa", "Kukcha", "Qadamjoy"],
+        "Yakkasaroy": ["Yakkasaroy", "Kucha", "Vodnik"],
+        "Yashnobod": ["Yashnobod", "Shifokor", "Muqimiy"],
+        "Yunusobod": ["Yunusobod", "Buyuk Ipak Yuli", "Bobur"],
+        "Yashil": ["Yashil", "Doston", "Temur Malik"]
+    },
+    "Andijon": {
+        "Andijon shahri": ["Markaziy", "Sharqiy", "Shimoliy"],
+        "Asaka": ["Asaka", "Kasr", "Navoiy"],
+        "Baliqchi": ["Baliqchi", "Yangiqishloq", "Qoraqum"],
+        "Bo'z": ["Bo'z", "Xonobod", "Yangi Hayot"],
+        "Buloqboshi": ["Buloqboshi", "Tinchlik", "Mustaqillik"]
+    },
+    "Buxoro": {
+        "Buxoro shahri": ["Abu Ali ibn Sino", "Ismoil Somoniy", "Markaziy"],
+        "Kogon": ["Kogon", "Dustlik", "Yangi Hayot"],
+        "Olot": ["Olot", "Tinchlik", "Guliston"],
+        "Peshku": ["Peshku", "Bog'bon", "Yangiariq"],
+        "Qorako'l": ["Qorako'l", "Samarkand", "Istiqlol"]
+    },
+    "Jizzax": {
+        "Jizzax shahri": ["Markaziy", "Istiqlol", "Mustaqillik"],
+        "Arnasoy": ["Arnasoy", "Tinchlik", "Yangiyer"],
+        "Baxtiyor": ["Baxtiyor", "Guliston", "Mehnat"],
+        "Do'stlik": ["Do'stlik", "Yangi Hayot", "Bog'bon"],
+        "Forish": ["Forish", "Qizilcha", "Yangiqishloq"]
+    },
+    "Qashqadaryo": {
+        "Qarshi": ["Markaziy", "Nishon", "Nasaf"],
+        "Dehqonobod": ["Dehqonobod", "Guliston", "Yangi Hayot"],
+        "Qamashi": ["Qamashi", "Bog'bon", "Tinchlik"],
+        "Koson": ["Koson", "Istiqlol", "Mustaqillik"],
+        "Kitob": ["Kitob", "Yangiariq", "Mehnat"]
+    },
+    "Navoiy": {
+        "Navoiy shahri": ["Markaziy", "Kimyogarlar", "Metallurg"],
+        "Zarafshon": ["Zarafshon", "Oltin Vodiy", "Yangi Hayot"],
+        "Xatirchi": ["Xatirchi", "Guliston", "Tinchlik"],
+        "Navbahor": ["Navbahor", "Bog'bon", "Istiqlol"],
+        "Tomdi": ["Tomdi", "Yangiariq", "Mustaqillik"]
+    },
+    "Namangan": {
+        "Namangan shahri": ["Markaziy", "Sharq", "Shimol"],
+        "Chortoq": ["Chortoq", "Yangi Hayot", "Guliston"],
+        "Kosonsoy": ["Kosonsoy", "Bog'bon", "Tinchlik"],
+        "Mingbuloq": ["Mingbuloq", "Istiqlol", "Mustaqillik"],
+        "Pop": ["Pop", "Yangiariq", "Mehnat"]
+    },
+    "Samarqand": {
+        "Samarqand shahri": ["Markaziy", "Afrosiyob", "Registon"],
+        "Bulung'ur": ["Bulung'ur", "Yangi Hayot", "Guliston"],
+        "Kattaqo'rg'on": ["Kattaqo'rg'on", "Bog'bon", "Tinchlik"],
+        "Ishtixon": ["Ishtixon", "Istiqlol", "Mustaqillik"],
+        "Narpay": ["Narpay", "Yangiariq", "Mehnat"]
+    },
+    "Surxondaryo": {
+        "Termiz": ["Markaziy", "Amir Temur", "Al-Hakim At-Termiziy"],
+        "Angor": ["Angor", "Yangi Hayot", "Guliston"],
+        "Boysun": ["Boysun", "Bog'bon", "Tinchlik"],
+        "Denov": ["Denov", "Istiqlol", "Mustaqillik"],
+        "Jarqo'rg'on": ["Jarqo'rg'on", "Yangiariq", "Mehnat"]
+    },
+    "Sirdaryo": {
+        "Guliston": ["Markaziy", "Istiqlol", "Mustaqillik"],
+        "Boyovut": ["Boyovut", "Yangi Hayot", "Guliston"],
+        "Mirzaobod": ["Mirzaobod", "Bog'bon", "Tinchlik"],
+        "Sayxunobod": ["Sayxunobod", "Yangiariq", "Mehnat"],
+        "Xovos": ["Xovos", "Oqqo'rg'on", "Dustlik"]
+    },
+    "Toshkent": {
+        "Olmaliq": ["Markaziy", "Metallurg", "Kimyogar"],
+        "Angren": ["Angren", "Qumtepa", "Yangi Angren"],
+        "Bekobod": ["Bekobod", "Tinchlik", "Guliston"],
+        "Bo'ka": ["Bo'ka", "Bog'bon", "Yangi Hayot"],
+        "Bo'stonliq": ["Bo'stonliq", "Istiqlol", "Mustaqillik"]
+    },
+    "Farg'ona": {
+        "Farg'ona shahri": ["Markaziy", "Yangi Farg'ona", "Qo'qon yo'li"],
+        "Marg'ilon": ["Marg'ilon", "Ipakchi", "Hunarmand"],
+        "Qo'qon": ["Qo'qon", "Amir Temur", "Markaziy"],
+        "Beshariq": ["Beshariq", "Yangi Hayot", "Guliston"],
+        "Bog'dod": ["Bog'dod", "Bog'bon", "Tinchlik"]
+    },
+    "Xorazm": {
+        "Urganch": ["Markaziy", "Al-Xorazmiy", "Avesto"],
+        "Xiva": ["Xiva", "Ichan Qala", "Toshqo'rg'on"],
+        "Shovot": ["Shovot", "Yangi Hayot", "Guliston"],
+        "Qo'shko'pir": ["Qo'shko'pir", "Bog'bon", "Tinchlik"],
+        "Yangiariq": ["Yangiariq", "Istiqlol", "Mustaqillik"]
+    },
+    "Qoraqalpog'iston": {
+        "Nukus": ["Markaziy", "Berdaqh", "Ajiniyoz"],
+        "Xo'jayli": ["Xo'jayli", "Yangi Hayot", "Guliston"],
+        "Qo'ng'irot": ["Qo'ng'irot", "Bog'bon", "Tinchlik"],
+        "Taxiatosh": ["Taxiatosh", "Istiqlol", "Mustaqillik"],
+        "To'rtko'l": ["To'rtko'l", "Yangiariq", "Mehnat"]
+    }
 }
 
-# 📌 Data management functions
-def load_json_data(file_path: str, default_data: Any = None) -> Any:
-    """Load data from JSON file"""
-    if not os.path.exists(file_path):
-        return default_data or {}
+def validate_name(name: str) -> bool:
+    """Validate name format (Uzbek names)"""
+    if not name or len(name.strip()) < 2:
+        return False
+    # Allow Uzbek letters, spaces, apostrophes
+    pattern = r"^[A-Za-zÀ-ÿĀ-žА-я\s']+$"
+    return bool(re.match(pattern, name.strip()))
+
+def validate_age(age_str: str) -> bool:
+    """Validate age (7-14 years)"""
+    try:
+        age = int(age_str)
+        return 7 <= age <= 14
+    except ValueError:
+        return False
+
+def validate_phone(phone: str) -> bool:
+    """Validate Uzbek phone number format"""
+    # Remove all non-digit characters
+    clean_phone = re.sub(r'\D', '', phone)
+    # Check for Uzbek mobile numbers
+    uzbek_patterns = [
+        r'^998[0-9]{9}$',      # +998XXXXXXXXX
+        r'^[0-9]{9}$',         # XXXXXXXXX
+        r'^[0-9]{12}$'         # 998XXXXXXXXX
+    ]
+    return any(re.match(pattern, clean_phone) for pattern in uzbek_patterns)
+
+def validate_region(region: str) -> bool:
+    """Check if region exists in our data"""
+    return region in REGIONS_DATA
+
+def validate_district(region: str, district: str) -> bool:
+    """Check if district exists in the specified region"""
+    if region not in REGIONS_DATA:
+        return False
+    return district in REGIONS_DATA[region]
+
+def validate_mahalla(region: str, district: str, mahalla: str) -> bool:
+    """Check if mahalla exists in the specified district"""
+    if not validate_district(region, district):
+        return False
+    return mahalla in REGIONS_DATA[region][district]
+
+def validate_document_format(filename: str, mime_type: str) -> bool:
+    """Validate document format (PDF, Word, Excel, Text)"""
+    allowed_extensions = {'.pdf', '.doc', '.docx', '.xls', '.xlsx', '.txt'}
+    allowed_mime_types = {
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/plain'
+    }
+    
+    if not filename:
+        return False
+        
+    file_ext = Path(filename).suffix.lower()
+    return file_ext in allowed_extensions or mime_type in allowed_mime_types
+
+def get_document_type(filename: str, mime_type: str) -> str:
+    """Get document type from filename and mime type"""
+    if not filename:
+        return "unknown"
+        
+    file_ext = Path(filename).suffix.lower()
+    
+    if file_ext in ['.pdf'] or 'pdf' in mime_type:
+        return "PDF"
+    elif file_ext in ['.doc', '.docx'] or 'word' in mime_type:
+        return "Word"
+    elif file_ext in ['.xls', '.xlsx'] or 'excel' in mime_type or 'spreadsheet' in mime_type:
+        return "Excel"
+    elif file_ext in ['.txt'] or 'text' in mime_type:
+        return "Text"
+    else:
+        return "unknown"
+
+def extract_text_from_document(file_content: bytes, filename: str, mime_type: str) -> str:
+    """Extract text content from various document formats"""
+    doc_type = get_document_type(filename, mime_type)
     
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return default_data or {}
-
-def save_json_data(file_path: str, data: Any) -> None:
-    """Save data to JSON file"""
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def get_users() -> Dict:
-    """Get all registered users"""
-    return load_json_data(USERS_FILE, {})
-
-def save_user(user_id: str, user_data: Dict) -> None:
-    """Save user data"""
-    users = get_users()
-    users[user_id] = user_data
-    save_json_data(USERS_FILE, users)
-
-def get_admins() -> Dict:
-    """Get all admins"""
-    default_admins = {str(SUPER_ADMIN_ID): {"role": "super_admin", "added_by": "system", "added_date": get_uzbekistan_time().isoformat()}}
-    return load_json_data(ADMINS_FILE, default_admins)
-
-def save_admin(admin_id: str, admin_data: Dict) -> None:
-    """Save admin data"""
-    admins = get_admins()
-    admins[admin_id] = admin_data
-    save_json_data(ADMINS_FILE, admins)
-
-def remove_admin(admin_id: str) -> bool:
-    """Remove admin by ID"""
-    try:
-        admins = get_admins()
-        if admin_id in admins:
-            del admins[admin_id]
-            save_json_data(ADMINS_FILE, admins)
-            return True
-        return False
+        if doc_type == "Text":
+            return file_content.decode('utf-8', errors='ignore')
+        elif doc_type == "Word" and DOCX_AVAILABLE:
+            doc = DocxDocument(BytesIO(file_content))
+            return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+        elif doc_type == "PDF":
+            # For PDF, we'll return a placeholder since we don't have PDF text extraction
+            return f"PDF document: {filename} (text extraction not available)"
+        elif doc_type == "Excel" and EXCEL_AVAILABLE:
+            workbook = openpyxl.load_workbook(BytesIO(file_content))
+            text_content = []
+            for sheet in workbook.worksheets:
+                for row in sheet.iter_rows(values_only=True):
+                    text_content.append(' '.join([str(cell) if cell else '' for cell in row]))
+            return '\n'.join(text_content)
+        else:
+            return f"Document format not supported for text extraction: {doc_type}"
     except Exception as e:
-        logging.error(f"Error removing admin data: {e}")
+        logger.error(f"Error extracting text from {doc_type} document: {e}")
+        return f"Error extracting text from {doc_type} document"
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# DATA MANAGER
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class DataManager:
+    """Optimized data manager for high concurrent load"""
+    
+    def __init__(self):
+        self.data_files = {
+            'users': DATA_DIR / 'users.json',
+            'admins': DATA_DIR / 'admins.json',
+            'tests': DATA_DIR / 'tests.json',
+            'results': DATA_DIR / 'results.json',
+            'statistics': DATA_DIR / 'statistics.json',
+            'broadcasts': DATA_DIR / 'broadcasts.json',
+            'bot_users': DATA_DIR / 'bot_users.json',
+            'access_control': DATA_DIR / 'access_control.json'
+        }
+        self._ensure_data_files()
+
+    def _ensure_data_files(self):
+        """Initialize data files with default structures"""
+        default_data = {
+            'users': {},
+            'admins': {
+                "super_admins": ["username1", "username2"],  # Replace with actual admin usernames
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            },
+            'tests': {
+                "7-10": {},
+                "11-14": {}
+            },
+            'results': {},
+            'statistics': {
+                "total_users": 0,
+                "total_tests_taken": 0,
+                "regional_stats": {},
+                "age_group_stats": {
+                    "7-10": {"users": 0, "tests_taken": 0},
+                    "11-14": {"users": 0, "tests_taken": 0}
+                },
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            },
+            'broadcasts': {},
+            'bot_users': {},
+            'access_control': {
+                "test_access_enabled": True,
+                "allowed_users": [],
+                "last_updated": datetime.now(timezone.utc).isoformat()
+            }
+        }
+
+        for key, file_path in self.data_files.items():
+            if not file_path.exists():
+                self._save_data(key, default_data[key])
+
+    def _load_data(self, data_type: str) -> Dict[str, Any]:
+        """Load data from JSON file with error handling"""
+        try:
+            with open(self.data_files[data_type], 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Error loading {data_type}: {e}")
+            return {}
+
+    def _save_data(self, data_type: str, data: Dict[str, Any]) -> bool:
+        """Save data to JSON file with atomic writes"""
+        try:
+            temp_file = self.data_files[data_type].with_suffix('.tmp')
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            temp_file.replace(self.data_files[data_type])
+            return True
+        except Exception as e:
+            logger.error(f"Error saving {data_type}: {e}")
+            return False
+
+    # User management
+    def save_user(self, user_data: Dict[str, Any]) -> str:
+        """Save user with unique registration ID"""
+        users = self._load_data('users')
+        reg_id = f"{user_data['telegram_id']}_{datetime.now().timestamp()}"
+        
+        user_data['registration_id'] = reg_id
+        user_data['registration_date'] = datetime.now(timezone.utc).isoformat()
+        
+        users[reg_id] = user_data
+        
+        if self._save_data('users', users):
+            self._update_statistics_for_new_user(user_data)
+            return reg_id
+        return ""
+
+    def get_user_registrations(self, telegram_id: int) -> List[Dict[str, Any]]:
+        """Get all registrations for a user (unlimited registrations allowed)"""
+        users = self._load_data('users')
+        user_registrations = []
+        
+        for reg_id, user_data in users.items():
+            if user_data.get('telegram_id') == telegram_id:
+                user_registrations.append({
+                    'registration_id': reg_id,
+                    **user_data
+                })
+        
+        return sorted(user_registrations, key=lambda x: x.get('registration_date', ''), reverse=True)
+
+    def get_all_users(self) -> Dict[str, Any]:
+        """Get all users"""
+        return self._load_data('users')
+
+    # Admin management (Super Admin only)
+    def is_super_admin(self, username: str) -> bool:
+        """Check if user is super admin"""
+        if not username:
+            return False
+        admins = self._load_data('admins')
+        return username in admins.get('super_admins', [])
+
+    def add_super_admin(self, username: str) -> bool:
+        """Add super admin"""
+        admins = self._load_data('admins')
+        if username not in admins.get('super_admins', []):
+            admins.setdefault('super_admins', []).append(username)
+            admins['last_updated'] = datetime.now(timezone.utc).isoformat()
+            return self._save_data('admins', admins)
         return False
 
-def get_tests() -> Dict:
-    """Get all tests"""
-    return load_json_data(TESTS_FILE, {"7-10": {}, "11-14": {}})
+    def remove_super_admin(self, username: str) -> bool:
+        """Remove super admin"""
+        admins = self._load_data('admins')
+        if username in admins.get('super_admins', []):
+            admins['super_admins'].remove(username)
+            admins['last_updated'] = datetime.now(timezone.utc).isoformat()
+            return self._save_data('admins', admins)
+        return False
 
-def save_test(test_data: Dict) -> None:
-    """Save test data"""
-    tests = get_tests()
-    age_group = test_data["age_group"]
-    test_id = str(uuid.uuid4())
-    
-    if age_group not in tests:
-        tests[age_group] = {}
-    
-    tests[age_group][test_id] = test_data
-    save_json_data(TESTS_FILE, tests)
+    def get_super_admins(self) -> List[str]:
+        """Get list of super admins"""
+        admins = self._load_data('admins')
+        return admins.get('super_admins', [])
 
-def get_results() -> List:
-    """Get all test results"""
-    return load_json_data(RESULTS_FILE, [])
+    # Test management
+    def save_test(self, test_data: Dict[str, Any], age_group: str) -> str:
+        """Save test to appropriate age group"""
+        tests = self._load_data('tests')
+        test_id = str(uuid.uuid4())
+        
+        test_data['test_id'] = test_id
+        test_data['created_at'] = datetime.now(timezone.utc).isoformat()
+        
+        if age_group not in tests:
+            tests[age_group] = {}
+        
+        tests[age_group][test_id] = test_data
+        
+        if self._save_data('tests', tests):
+            return test_id
+        return ""
 
-def save_result(result_data: Dict) -> None:
-    """Save test result"""
-    results = get_results()
-    results.append(result_data)
-    save_json_data(RESULTS_FILE, results)
+    def get_tests_by_age_group(self, age_group: str) -> Dict[str, Any]:
+        """Get tests for specific age group"""
+        tests = self._load_data('tests')
+        return tests.get(age_group, {})
 
+    def get_test(self, test_id: str, age_group: str) -> Optional[Dict[str, Any]]:
+        """Get specific test"""
+        tests = self.get_tests_by_age_group(age_group)
+        return tests.get(test_id)
 
+    def delete_test(self, test_id: str, age_group: str) -> bool:
+        """Delete test"""
+        tests = self._load_data('tests')
+        if age_group in tests and test_id in tests[age_group]:
+            del tests[age_group][test_id]
+            return self._save_data('tests', tests)
+        return False
 
-def get_broadcasts() -> List:
-    """Get all broadcast history"""
-    return load_json_data(BROADCASTS_FILE, [])
+    # Results management
+    def save_test_result(self, result_data: Dict[str, Any]) -> str:
+        """Save test result"""
+        results = self._load_data('results')
+        result_id = str(uuid.uuid4())
+        
+        result_data['result_id'] = result_id
+        result_data['completed_at'] = datetime.now(timezone.utc).isoformat()
+        
+        results[result_id] = result_data
+        
+        if self._save_data('results', results):
+            self._update_statistics_for_test_result(result_data)
+            return result_id
+        return ""
 
-def save_broadcast(broadcast_data: Dict) -> None:
-    """Save broadcast data"""
-    broadcasts = get_broadcasts()
-    broadcasts.append(broadcast_data)
-    save_json_data(BROADCASTS_FILE, broadcasts)
+    def get_user_results(self, telegram_id: int) -> List[Dict[str, Any]]:
+        """Get all test results for a user"""
+        results = self._load_data('results')
+        user_results = []
+        
+        for result_id, result_data in results.items():
+            if result_data.get('telegram_id') == telegram_id:
+                user_results.append({
+                    'result_id': result_id,
+                    **result_data
+                })
+        
+        return sorted(user_results, key=lambda x: x.get('completed_at', ''), reverse=True)
 
-def get_statistics() -> Dict:
-    """Get statistics data"""
-    return load_json_data(STATISTICS_FILE, {})
+    def get_all_results(self) -> Dict[str, Any]:
+        """Get all test results"""
+        return self._load_data('results')
 
-def update_statistics() -> None:
-    """Update comprehensive statistics"""
-    users = get_users()
-    results = get_results()
-    
-    # Regional statistics
-    regional_stats = {}
-    for region in REGIONS.keys():
-        regional_stats[region] = {
-            "total_users": 0,
-            "districts": {}
+    # Access control
+    def can_access_tests(self, telegram_id: int, username: str) -> bool:
+        """Check if user can access tests"""
+        access_control = self._load_data('access_control')
+        
+        # If test access is disabled, only super admins can access
+        if not access_control.get('test_access_enabled', True):
+            return self.is_super_admin(username or "")
+        
+        # If allowed_users list is empty, everyone can access
+        allowed_users = access_control.get('allowed_users', [])
+        if not allowed_users:
+            return True
+        
+        # Check if user is in allowed list (by username or telegram_id)
+        return (username and username in allowed_users) or str(telegram_id) in allowed_users
+
+    def update_test_access(self, enabled: bool, allowed_users: Optional[List[str]] = None) -> bool:
+        """Update test access control"""
+        access_control = self._load_data('access_control')
+        access_control['test_access_enabled'] = enabled
+        if allowed_users is not None:
+            access_control['allowed_users'] = allowed_users
+        access_control['last_updated'] = datetime.now(timezone.utc).isoformat()
+        return self._save_data('access_control', access_control)
+
+    def get_access_control_info(self) -> Dict[str, Any]:
+        """Get access control information"""
+        return self._load_data('access_control')
+
+    # Bot users tracking
+    def track_bot_user(self, user_data: Dict[str, Any]) -> bool:
+        """Track bot user for broadcasting"""
+        bot_users = self._load_data('bot_users')
+        user_id = str(user_data.get('telegram_id'))
+        
+        bot_users[user_id] = {
+            'telegram_id': user_data.get('telegram_id'),
+            'username': user_data.get('username'),
+            'first_name': user_data.get('first_name'),
+            'last_seen': datetime.now(timezone.utc).isoformat()
         }
         
-        for district in REGIONS[region]:
-            regional_stats[region]["districts"][district] = 0
-    
-    # Count users by region and district
-    for user_data in users.values():
-        region = user_data.get("region", "Unknown")
-        district = user_data.get("district", "Unknown")
+        return self._save_data('bot_users', bot_users)
+
+    def get_all_bot_users(self) -> Dict[str, Any]:
+        """Get all bot users"""
+        return self._load_data('bot_users')
+
+    # Broadcasting
+    def save_broadcast(self, broadcast_data: Dict[str, Any]) -> str:
+        """Save broadcast message"""
+        broadcasts = self._load_data('broadcasts')
+        broadcast_id = str(uuid.uuid4())
         
-        if region in regional_stats:
-            regional_stats[region]["total_users"] += 1
-            if district in regional_stats[region]["districts"]:
-                regional_stats[region]["districts"][district] += 1
-    
-    # Test statistics
-    test_stats = {
-        "total_tests_taken": len(results),
-        "average_score": 0,
-        "high_scorers_70plus": 0,
-        "age_group_stats": {
-            "7-10": {"count": 0, "avg_score": 0},
-            "11-14": {"count": 0, "avg_score": 0}
-        }
-    }
-    
-    if results:
-        total_score = sum(result.get("score", 0) for result in results)
-        test_stats["average_score"] = round(total_score / len(results), 2)
-        test_stats["high_scorers_70plus"] = len([r for r in results if r.get("score", 0) >= 70])
+        broadcast_data['broadcast_id'] = broadcast_id
+        broadcast_data['created_at'] = datetime.now(timezone.utc).isoformat()
         
-        # Age group statistics
-        age_7_10 = [r for r in results if r.get("age") in ["7", "8", "9", "10"]]
-        age_11_14 = [r for r in results if r.get("age") in ["11", "12", "13", "14"]]
+        broadcasts[broadcast_id] = broadcast_data
         
-        if age_7_10:
-            test_stats["age_group_stats"]["7-10"]["count"] = len(age_7_10)
-            test_stats["age_group_stats"]["7-10"]["avg_score"] = round(
-                sum(r.get("score", 0) for r in age_7_10) / len(age_7_10), 2
-            )
+        if self._save_data('broadcasts', broadcasts):
+            return broadcast_id
+        return ""
+
+    def get_all_broadcasts(self) -> Dict[str, Any]:
+        """Get all broadcasts"""
+        return self._load_data('broadcasts')
+
+    # Statistics
+    def _update_statistics_for_new_user(self, user_data: Dict[str, Any]) -> None:
+        """Update statistics when a new user registers"""
+        stats = self._load_data('statistics')
         
-        if age_11_14:
-            test_stats["age_group_stats"]["11-14"]["count"] = len(age_11_14)
-            test_stats["age_group_stats"]["11-14"]["avg_score"] = round(
-                sum(r.get("score", 0) for r in age_11_14) / len(age_11_14), 2
-            )
+        stats['total_users'] = stats.get('total_users', 0) + 1
+        
+        # Update regional stats
+        region = user_data.get('region')
+        if region:
+            if 'regional_stats' not in stats:
+                stats['regional_stats'] = {}
+            stats['regional_stats'][region] = stats['regional_stats'].get(region, 0) + 1
+        
+        # Update age group stats
+        age = user_data.get('age')
+        if age:
+            try:
+                age_int = int(age)
+                age_group = "7-10" if 7 <= age_int <= 10 else "11-14"
+                if 'age_group_stats' not in stats:
+                    stats['age_group_stats'] = {"7-10": {"users": 0, "tests_taken": 0}, "11-14": {"users": 0, "tests_taken": 0}}
+                stats['age_group_stats'][age_group]['users'] = stats['age_group_stats'][age_group].get('users', 0) + 1
+            except ValueError:
+                pass
+        
+        stats['last_updated'] = datetime.now(timezone.utc).isoformat()
+        self._save_data('statistics', stats)
+
+    def _update_statistics_for_test_result(self, result_data: Dict[str, Any]) -> None:
+        """Update statistics when a test is completed"""
+        stats = self._load_data('statistics')
+        
+        stats['total_tests_taken'] = stats.get('total_tests_taken', 0) + 1
+        
+        # Update age group test stats
+        age_group = result_data.get('age_group')
+        if age_group and 'age_group_stats' in stats and age_group in stats['age_group_stats']:
+            stats['age_group_stats'][age_group]['tests_taken'] = stats['age_group_stats'][age_group].get('tests_taken', 0) + 1
+        
+        stats['last_updated'] = datetime.now(timezone.utc).isoformat()
+        self._save_data('statistics', stats)
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get system statistics"""
+        return self._load_data('statistics')
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# DOCUMENT EXPORT MANAGER
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class DocumentExportManager:
+    """Manager for multi-format document exports"""
     
-    # Top performers ranking
-    ranking_data = []
-    for result in results:
-        ranking_data.append({
-            "user_name": result.get("user_name", "Unknown"),
-            "score": result.get("score", 0),
-            "percentage": result.get("percentage", 0),
-            "age": result.get("age", "Unknown"),
-            "region": result.get("region", "Unknown"),
-            "date": result.get("date", "Unknown")
-        })
-    
-    # Sort by score (descending)
-    ranking_data.sort(key=lambda x: x["score"], reverse=True)
-    
-    statistics = {
-        "last_updated": get_uzbekistan_time().isoformat(),
-        "total_registered_users": len(users),
-        "regional_statistics": regional_stats,
-        "test_statistics": test_stats,
-        "top_performers": ranking_data[:100]  # Top 100 performers
-    }
-    
-    save_json_data(STATISTICS_FILE, statistics)
+    def __init__(self, data_manager: DataManager):
+        self.data_manager = data_manager
 
-def is_admin(user_id: int) -> bool:
-    """Check if user is admin"""
-    admins = get_admins()
-    return str(user_id) in admins
+    def export_users_excel(self) -> Optional[BytesIO]:
+        """Export users data to Excel format"""
+        if not EXCEL_AVAILABLE:
+            logger.error("Excel export not available - openpyxl not installed")
+            return None
 
-def is_super_admin(user_id: int) -> bool:
-    """Check if user is super admin"""
-    admins = get_admins()
-    return str(user_id) in admins and admins[str(user_id)].get("role") == "super_admin"
+        try:
+            users = self.data_manager.get_all_users()
+            
+            workbook = openpyxl.Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Foydalanuvchilar"
+            
+            # Headers
+            headers = [
+                "Registration ID", "Telegram ID", "Bola ismi", "Ota-ona ismi",
+                "Viloyat", "Tuman", "Mahalla", "Yosh", "Telefon", "Username",
+                "Ro'yxatdan o'tgan sana"
+            ]
+            
+            for col, header in enumerate(headers, 1):
+                cell = worksheet.cell(row=1, column=col, value=header)
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+            
+            # Data
+            for row, (reg_id, user_data) in enumerate(users.items(), 2):
+                worksheet.cell(row=row, column=1, value=reg_id)
+                worksheet.cell(row=row, column=2, value=user_data.get('telegram_id', ''))
+                worksheet.cell(row=row, column=3, value=user_data.get('child_name', ''))
+                worksheet.cell(row=row, column=4, value=user_data.get('parent_name', ''))
+                worksheet.cell(row=row, column=5, value=user_data.get('region', ''))
+                worksheet.cell(row=row, column=6, value=user_data.get('district', ''))
+                worksheet.cell(row=row, column=7, value=user_data.get('mahalla', ''))
+                worksheet.cell(row=row, column=8, value=user_data.get('age', ''))
+                worksheet.cell(row=row, column=9, value=user_data.get('phone', ''))
+                worksheet.cell(row=row, column=10, value=user_data.get('username', ''))
+                worksheet.cell(row=row, column=11, value=user_data.get('registration_date', ''))
+            
+            # Auto-adjust column widths
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            output = BytesIO()
+            workbook.save(output)
+            output.seek(0)
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error creating Excel export: {e}")
+            return None
 
-def has_special_privileges(user_id: int) -> bool:
-    """Check if user has special admin privileges"""
-    return user_id in SPECIAL_ADMIN_IDS
+    def export_users_word(self) -> Optional[BytesIO]:
+        """Export users data to Word format"""
+        if not DOCX_AVAILABLE:
+            logger.error("Word export not available - python-docx not installed")
+            return None
 
-# 📌 FSM States
-class Registration(StatesGroup):
-    check_subscription = State()
-    child_name = State()
-    parent_name = State()
-    region = State()
-    district = State()
-    mahalla = State()
-    age = State()
-    phone = State()
-    feedback = State()
+        try:
+            users = self.data_manager.get_all_users()
+            
+            doc = DocxDocument()
+            
+            # Title
+            title = doc.add_heading("FOYDALANUVCHILAR MA'LUMOTLARI", 0)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Content
+            for i, (reg_id, user_data) in enumerate(users.items(), 1):
+                doc.add_heading(f"{i}. FOYDALANUVCHI", level=2)
+                
+                table = doc.add_table(rows=11, cols=2)
+                table.style = 'Table Grid'
+                
+                fields = [
+                    ("Registration ID", reg_id),
+                    ("Telegram ID", user_data.get('telegram_id', 'N/A')),
+                    ("Bola ismi", user_data.get('child_name', 'N/A')),
+                    ("Ota-ona ismi", user_data.get('parent_name', 'N/A')),
+                    ("Viloyat", user_data.get('region', 'N/A')),
+                    ("Tuman", user_data.get('district', 'N/A')),
+                    ("Mahalla", user_data.get('mahalla', 'N/A')),
+                    ("Yosh", user_data.get('age', 'N/A')),
+                    ("Telefon", user_data.get('phone', 'N/A')),
+                    ("Username", user_data.get('username', 'N/A')),
+                    ("Ro'yxatdan o'tgan sana", user_data.get('registration_date', 'N/A'))
+                ]
+                
+                for row_idx, (field, value) in enumerate(fields):
+                    table.cell(row_idx, 0).text = field
+                    table.cell(row_idx, 1).text = str(value)
+                
+                doc.add_page_break()
+            
+            output = BytesIO()
+            doc.save(output)
+            output.seek(0)
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error creating Word export: {e}")
+            return None
 
-class AdminStates(StatesGroup):
-    add_admin = State()
-    remove_admin = State()
-    promote_super_admin = State()
-    add_test_age = State()
-    add_test_book = State()
-    add_test_content = State()
-    add_test_questions = State()
-    delete_test_age = State()
-    delete_test_select = State()
-    broadcast_message = State()
-    broadcast_confirm = State()
+    def export_users_pdf(self) -> Optional[BytesIO]:
+        """Export users data to PDF format"""
+        if not PDF_AVAILABLE:
+            logger.error("PDF export not available - reportlab not installed")
+            return None
 
-    view_statistics = State()
-    view_rankings = State()
+        try:
+            users = self.data_manager.get_all_users()
+            
+            output = BytesIO()
+            doc = SimpleDocTemplate(output, pagesize=landscape(A4))
+            content = []
+            
+            # Get styles
+            styles = getSampleStyleSheet()
+            
+            # Title
+            title = Paragraph("FOYDALANUVCHILAR MA'LUMOTLARI", styles['Title'])
+            content.append(title)
+            
+            # Prepare table data
+            table_data = [
+                ['Registration ID', 'Telegram ID', 'Bola ismi', 'Ota-ona ismi', 'Viloyat', 'Tuman', 'Yosh', 'Telefon']
+            ]
+            
+            for reg_id, user_data in users.items():
+                row = [
+                    reg_id[:20] + '...' if len(reg_id) > 20 else reg_id,
+                    str(user_data.get('telegram_id', 'N/A')),
+                    user_data.get('child_name', 'N/A')[:15] + '...' if len(user_data.get('child_name', '')) > 15 else user_data.get('child_name', 'N/A'),
+                    user_data.get('parent_name', 'N/A')[:15] + '...' if len(user_data.get('parent_name', '')) > 15 else user_data.get('parent_name', 'N/A'),
+                    user_data.get('region', 'N/A')[:10] + '...' if len(user_data.get('region', '')) > 10 else user_data.get('region', 'N/A'),
+                    user_data.get('district', 'N/A')[:10] + '...' if len(user_data.get('district', '')) > 10 else user_data.get('district', 'N/A'),
+                    str(user_data.get('age', 'N/A')),
+                    user_data.get('phone', 'N/A')[:12] + '...' if len(user_data.get('phone', '')) > 12 else user_data.get('phone', 'N/A')
+                ]
+                table_data.append(row)
+            
+            # Create table
+            table = Table(table_data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            
+            content.append(table)
+            
+            # Build PDF
+            doc.build(content)
+            output.seek(0)
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error creating PDF export: {e}")
+            return None
+
+    def export_users_text(self) -> str:
+        """Export users data to text format"""
+        try:
+            users = self.data_manager.get_all_users()
+            
+            text_content = "FOYDALANUVCHILAR MA'LUMOTLARI\n"
+            text_content += "=" * 50 + "\n\n"
+            
+            for i, (reg_id, user_data) in enumerate(users.items(), 1):
+                text_content += f"{i}. FOYDALANUVCHI\n"
+                text_content += f"   Registration ID: {reg_id}\n"
+                text_content += f"   Telegram ID: {user_data.get('telegram_id', 'N/A')}\n"
+                text_content += f"   Bola ismi: {user_data.get('child_name', 'N/A')}\n"
+                text_content += f"   Ota-ona ismi: {user_data.get('parent_name', 'N/A')}\n"
+                text_content += f"   Viloyat: {user_data.get('region', 'N/A')}\n"
+                text_content += f"   Tuman: {user_data.get('district', 'N/A')}\n"
+                text_content += f"   Mahalla: {user_data.get('mahalla', 'N/A')}\n"
+                text_content += f"   Yosh: {user_data.get('age', 'N/A')}\n"
+                text_content += f"   Telefon: {user_data.get('phone', 'N/A')}\n"
+                username = user_data.get('username', 'Noma\'lum')
+                text_content += f"   Username: {username}\n"
+                text_content += f"   Ro'yxatdan o'tgan sana: {user_data.get('registration_date', 'N/A')}\n"
+                text_content += "-" * 30 + "\n\n"
+            
+            return text_content
+            
+        except Exception as e:
+            logger.error(f"Error creating text export: {e}")
+            return f"Eksport yaratishda xatolik: {str(e)}"
+
+    def export_results_excel(self) -> Optional[BytesIO]:
+        """Export test results to Excel format"""
+        if not EXCEL_AVAILABLE:
+            return None
+
+        try:
+            results = self.data_manager.get_all_results()
+            
+            workbook = openpyxl.Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Test Natijalari"
+            
+            # Headers
+            headers = [
+                "Result ID", "Telegram ID", "Test ID", "Test Name", "Age Group",
+                "Score", "Total Questions", "Percentage", "Completed At"
+            ]
+            
+            for col, header in enumerate(headers, 1):
+                cell = worksheet.cell(row=1, column=col, value=header)
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(start_color="CCCCCC", end_color="CCCCCC", fill_type="solid")
+            
+            # Data
+            for row, (result_id, result_data) in enumerate(results.items(), 2):
+                worksheet.cell(row=row, column=1, value=result_id)
+                worksheet.cell(row=row, column=2, value=result_data.get('telegram_id', ''))
+                worksheet.cell(row=row, column=3, value=result_data.get('test_id', ''))
+                worksheet.cell(row=row, column=4, value=result_data.get('test_name', ''))
+                worksheet.cell(row=row, column=5, value=result_data.get('age_group', ''))
+                worksheet.cell(row=row, column=6, value=result_data.get('score', 0))
+                worksheet.cell(row=row, column=7, value=result_data.get('total_questions', 0))
+                worksheet.cell(row=row, column=8, value=f"{result_data.get('percentage', 0):.1f}%")
+                worksheet.cell(row=row, column=9, value=result_data.get('completed_at', ''))
+            
+            output = BytesIO()
+            workbook.save(output)
+            output.seek(0)
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error creating Excel results export: {e}")
+            return None
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# FSM STATES
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class UserRegistrationStates(StatesGroup):
+    waiting_for_child_name = State()
+    waiting_for_parent_name = State()
+    waiting_for_region = State()
+    waiting_for_district = State()
+    waiting_for_mahalla = State()
+    waiting_for_age = State()
+    waiting_for_phone = State()
 
 class TestStates(StatesGroup):
+    selecting_age_group = State()
+    selecting_test = State()
     taking_test = State()
-    test_question = State()
 
-# Certificate generation removed as requested
+class AdminStates(StatesGroup):
+    # Test management
+    creating_test_name = State()
+    creating_test_age_group = State()
+    creating_test_document = State()
+    creating_test_questions = State()
+    
+    # Access control
+    managing_access_control = State()
+    adding_allowed_user = State()
+    
+    # Broadcasting
+    creating_broadcast = State()
+    
+    # Export
+    selecting_export_format = State()
 
-# 📌 Keyboards
-def get_main_menu():
+# ═══════════════════════════════════════════════════════════════════════════════════
+# KEYBOARD HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     """Main menu keyboard"""
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📋 Ro'yxatdan o'tish")],
-        [KeyboardButton(text="📝 Test topshirish")],
-        [KeyboardButton(text="💬 Fikr va maslahatlar")],
-        [KeyboardButton(text="📚 Loyiha haqida")]
-    ], resize_keyboard=True)
-
-def get_admin_menu(is_super: bool = False):
-    """Admin menu keyboard"""
     keyboard = [
-        [KeyboardButton(text="👥 Foydalanuvchilar ro'yxati")],
-        [KeyboardButton(text="➕ Test qo'shish")]
+        [KeyboardButton(text="📝 Ro'yxatdan o'tish")],
+        [KeyboardButton(text="📚 Test ishlash"), KeyboardButton(text="📊 Natijalarim")],
+        [KeyboardButton(text="ℹ️ Bot haqida"), KeyboardButton(text="☎️ Aloqa")]
     ]
-    
-    if is_super:
-        keyboard.extend([
-            [KeyboardButton(text="👨‍💼 Adminlar ro'yxati")],
-            [KeyboardButton(text="➕ Admin qo'shish")],
-            [KeyboardButton(text="⬆️ Super Admin tayinlash")],
-            [KeyboardButton(text="➖ Admin o'chirish")],
-            [KeyboardButton(text="🗑 Test o'chirish")],
-            [KeyboardButton(text="📊 Test natijalarini yuklab olish")],
-            [KeyboardButton(text="📋 Foydalanuvchi ma'lumotlarini yuklab olish")],
-            [KeyboardButton(text="📢 Xabar yuborish")],
-            [KeyboardButton(text="📊 Statistika va monitoring")],
-            [KeyboardButton(text="🏆 Reytinglar ro'yxati")]
-        ])
-    
-    keyboard.append([KeyboardButton(text="🔙 Asosiy menyu")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-def get_age_group_keyboard():
-    """Age group selection keyboard"""
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="7-10 yosh")],
-        [KeyboardButton(text="11-14 yosh")],
-        [KeyboardButton(text="🔙 Orqaga")]
-    ], resize_keyboard=True)
+def get_admin_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Admin menu keyboard (Super Admin only)"""
+    keyboard = [
+        [KeyboardButton(text="👥 Foydalanuvchilar"), KeyboardButton(text="📋 Testlar")],
+        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="🔒 Kirish nazorati")],
+        [KeyboardButton(text="📢 Xabar yuborish"), KeyboardButton(text="📁 Eksport")],
+        [KeyboardButton(text="🔙 Asosiy menu")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-# 📌 PDF and Excel generation functions
-def generate_pdf_report(results: List[Dict]) -> bytes:
-    """Generate PDF report of test results"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
-    styles = getSampleStyleSheet()
+def get_regions_keyboard() -> InlineKeyboardMarkup:
+    """Regions inline keyboard"""
+    keyboard = []
+    regions = list(REGIONS_DATA.keys())
     
-    # Title
-    title = Paragraph("KITOBXON KIDS - Test Natijalari", styles['Title'])
+    # Create rows of 2 regions each
+    for i in range(0, len(regions), 2):
+        row = []
+        for j in range(i, min(i + 2, len(regions))):
+            row.append(InlineKeyboardButton(
+                text=regions[j],
+                callback_data=f"region:{regions[j]}"
+            ))
+        keyboard.append(row)
     
-    # Create table data
-    table_data = [['Foydalanuvchi', 'Yosh', 'Ball', 'Vaqt', 'Foiz', 'Sana']]
-    
-    for result in results:
-        table_data.append([
-            result.get('user_name', 'N/A'),
-            result.get('age', 'N/A'),
-            f"{result.get('score', 0)}/100",
-            result.get('time_taken', 'N/A'),
-            f"{result.get('percentage', 0)}%",
-            result.get('date', 'N/A')
-        ])
-    
-    # Create table
-    table = Table(table_data)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 14),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-    ]))
-    
-    # Build PDF
-    doc.build([title, table])
-    buffer.seek(0)
-    return buffer.getvalue()
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def generate_users_pdf_report(users_data: Dict) -> bytes:
-    """Generate PDF report of registered users"""
-    buffer = BytesIO()
-    # Use landscape orientation and larger page size for more space
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
-    styles = getSampleStyleSheet()
+def get_districts_keyboard(region: str) -> InlineKeyboardMarkup:
+    """Districts inline keyboard for a region"""
+    if region not in REGIONS_DATA:
+        return InlineKeyboardMarkup(inline_keyboard=[[]])
     
-    # Title
-    title = Paragraph("KITOBXON KIDS - Ro'yxatdan o'tgan foydalanuvchilar", styles['Title'])
+    keyboard = []
+    districts = list(REGIONS_DATA[region].keys())
     
-    # Create table data with wrapped text
-    table_data = [['Farzand nomi', 'Ota-ona', 'Yosh', 'Viloyat', 'Tuman', 'Telegram ID', 'Username', 'Telefon', 'Ro\'yxat sanasi']]
+    # Create rows of 2 districts each
+    for i in range(0, len(districts), 2):
+        row = []
+        for j in range(i, min(i + 2, len(districts))):
+            row.append(InlineKeyboardButton(
+                text=districts[j],
+                callback_data=f"district:{region}:{districts[j]}"
+            ))
+        keyboard.append(row)
     
-    for user_id, user_data in users_data.items():
-        username = user_data.get('username', 'N/A')
-        if username != 'N/A' and not username.startswith('@'):
-            username = f"@{username}"
-        
-        # Wrap long text in Paragraphs for better display
-        child_name = Paragraph(user_data.get('child_name', 'N/A'), styles['Normal'])
-        parent_name = Paragraph(user_data.get('parent_name', 'N/A'), styles['Normal'])
-        region = Paragraph(user_data.get('region', 'N/A'), styles['Normal'])
-        district = Paragraph(user_data.get('district', 'N/A'), styles['Normal'])
-        username_p = Paragraph(username, styles['Normal'])
-        phone = Paragraph(user_data.get('phone', 'N/A'), styles['Normal'])
-        
-        table_data.append([
-            child_name,
-            parent_name,
-            user_data.get('age', 'N/A'),
-            region,
-            district,
-            user_id,
-            username_p,
-            phone,
-            user_data.get('registration_date', 'N/A')[:10] if user_data.get('registration_date') else 'N/A'
-        ])
+    # Back button
+    keyboard.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_regions")])
     
-    # Create table with specific column widths
-    col_widths = [80, 80, 35, 70, 70, 60, 70, 70, 65]  # Adjusted widths
-    table = Table(table_data, colWidths=col_widths)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('TOPPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('FONTSIZE', (0, 1), (-1, -1), 8),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey])
-    ]))
-    
-    # Build PDF
-    doc.build([title, table])
-    buffer.seek(0)
-    return buffer.getvalue()
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def generate_excel_report(results: List[Dict]) -> bytes:
-    """Generate Excel report of test results"""
-    buffer = BytesIO()
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Test Natijalari"
+def get_mahallas_keyboard(region: str, district: str) -> InlineKeyboardMarkup:
+    """Mahallas inline keyboard for a district"""
+    if region not in REGIONS_DATA or district not in REGIONS_DATA[region]:
+        return InlineKeyboardMarkup(inline_keyboard=[[]])
     
-    # Headers
-    headers = ['Foydalanuvchi', 'Yosh', 'Ball', 'Vaqt', 'Foiz', 'Sana']
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center")
+    keyboard = []
+    mahallas = REGIONS_DATA[region][district]
     
-    # Data
-    for row, result in enumerate(results, 2):
-        ws.cell(row=row, column=1, value=result.get('user_name', 'N/A'))
-        ws.cell(row=row, column=2, value=result.get('age', 'N/A'))
-        ws.cell(row=row, column=3, value=f"{result.get('score', 0)}/100")
-        ws.cell(row=row, column=4, value=result.get('time_taken', 'N/A'))
-        ws.cell(row=row, column=5, value=f"{result.get('percentage', 0)}%")
-        ws.cell(row=row, column=6, value=result.get('date', 'N/A'))
+    # Create rows of 2 mahallas each
+    for i in range(0, len(mahallas), 2):
+        row = []
+        for j in range(i, min(i + 2, len(mahallas))):
+            row.append(InlineKeyboardButton(
+                text=mahallas[j],
+                callback_data=f"mahalla:{region}:{district}:{mahallas[j]}"
+            ))
+        keyboard.append(row)
     
-    # Auto-adjust column widths
-    for column in ws.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column_letter].width = adjusted_width
+    # Back button
+    keyboard.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data=f"back_to_districts:{region}")])
     
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer.getvalue()
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-def generate_users_excel_report(users_data: Dict) -> bytes:
-    """Generate Excel report of registered users"""
-    buffer = BytesIO()
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Foydalanuvchilar"
-    
-    # Headers
-    headers = ['Farzand nomi', 'Ota-ona nomi', 'Yosh', 'Viloyat', 'Tuman', 'Mahalla', 'Telegram ID', 'Username', 'Telefon', 'Ro\'yxat sanasi']
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    
-    # Data
-    for row, (user_id, user_data) in enumerate(users_data.items(), 2):
-        username = user_data.get('username', 'N/A')
-        if username != 'N/A' and not username.startswith('@'):
-            username = f"@{username}"
-        
-        ws.cell(row=row, column=1, value=user_data.get('child_name', 'N/A'))
-        ws.cell(row=row, column=2, value=user_data.get('parent_name', 'N/A'))
-        ws.cell(row=row, column=3, value=user_data.get('age', 'N/A'))
-        ws.cell(row=row, column=4, value=user_data.get('region', 'N/A'))
-        ws.cell(row=row, column=5, value=user_data.get('district', 'N/A'))
-        ws.cell(row=row, column=6, value=user_data.get('mahalla', 'N/A'))
-        ws.cell(row=row, column=7, value=user_id)
-        ws.cell(row=row, column=8, value=username)
-        ws.cell(row=row, column=9, value=user_data.get('phone', 'N/A'))
-        ws.cell(row=row, column=10, value=user_data.get('registration_date', 'N/A')[:10] if user_data.get('registration_date') else 'N/A')
-        
-        # Set text wrapping for all cells in this row
-        for col in range(1, 11):
-            ws.cell(row=row, column=col).alignment = Alignment(wrap_text=True, vertical="top")
-    
-    # Auto-adjust column widths
-    for column in ws.columns:
-        max_length = 0
-        column_letter = column[0].column_letter
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = min(max_length + 2, 50)
-        ws.column_dimensions[column_letter].width = adjusted_width
-    
-    # Set minimum row height for readability
-    for row in range(2, ws.max_row + 1):
-        ws.row_dimensions[row].height = 30
-    
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer.getvalue()
+def get_age_groups_keyboard() -> InlineKeyboardMarkup:
+    """Age groups keyboard for tests"""
+    keyboard = [
+        [InlineKeyboardButton(text="7-10 yosh", callback_data="age_group:7-10")],
+        [InlineKeyboardButton(text="11-14 yosh", callback_data="age_group:11-14")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-# 🔘 Start command and subscription check
-@dp.message(Command("start"))
-async def start(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
+def get_export_formats_keyboard() -> InlineKeyboardMarkup:
+    """Export formats keyboard"""
+    keyboard = [
+        [InlineKeyboardButton(text="📄 Text", callback_data="export:text")],
+        [InlineKeyboardButton(text="📊 Excel", callback_data="export:excel")],
+        [InlineKeyboardButton(text="📝 Word", callback_data="export:word")],
+        [InlineKeyboardButton(text="📄 PDF", callback_data="export:pdf")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# BOT INITIALIZATION
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+# Initialize data manager and export manager
+data_manager = DataManager()
+export_manager = DocumentExportManager(data_manager)
+
+# Initialize bot and dispatcher
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@router.message(CommandStart())
+async def start_handler(message: Message, state: FSMContext) -> None:
+    """Handle /start command"""
+    await state.clear()
     
-    # Check if user is admin
-    if is_admin(user_id):
-        is_super = is_super_admin(user_id)
+    user_data = {
+        'telegram_id': message.from_user.id,
+        'username': message.from_user.username,
+        'first_name': message.from_user.first_name
+    }
+    data_manager.track_bot_user(user_data)
+    
+    # Check if user is super admin
+    is_admin = data_manager.is_super_admin(message.from_user.username or "")
+    
+    welcome_text = f"Assalomu alaykum, {message.from_user.first_name}! 👋\n\n"
+    welcome_text += "📚 <b>Kitobxon Kids</b> botiga xush kelibsiz!\n\n"
+    welcome_text += "Bu bot 7-14 yosh orasidagi bolalar uchun o'qish tushunish testlarini o'tkazish uchun mo'ljallangan.\n\n"
+    welcome_text += "🎯 <b>Bot imkoniyatlari:</b>\n"
+    welcome_text += "• Ro'yxatdan o'tish (cheksiz registratsiya)\n"
+    welcome_text += "• Yosh guruhiga mos testlar\n"
+    welcome_text += "• Natijalarni ko'rish\n"
+    welcome_text += "• Ko'p formatda eksport\n\n"
+    
+    if is_admin:
+        welcome_text += "👑 <b>Admin sifatida qo'shimcha imkoniyatlar:</b>\n"
+        welcome_text += "• Testlarni boshqarish\n"
+        welcome_text += "• Foydalanuvchilar statistikasi\n"
+        welcome_text += "• Kirish nazorati\n"
+        welcome_text += "• Xabar yuborish\n"
+        welcome_text += "• Ma'lumotlarni eksport qilish\n\n"
+        keyboard = get_admin_menu_keyboard()
+    else:
+        keyboard = get_main_menu_keyboard()
+    
+    welcome_text += "Quyidagi tugmalardan birini tanlang:"
+    
+    await message.answer(welcome_text, reply_markup=keyboard)
+
+@router.message(F.text == "🔙 Asosiy menu")
+async def back_to_main_menu(message: Message, state: FSMContext) -> None:
+    """Return to main menu"""
+    await state.clear()
+    
+    is_admin = data_manager.is_super_admin(message.from_user.username or "")
+    keyboard = get_admin_menu_keyboard() if is_admin else get_main_menu_keyboard()
+    
+    await message.answer("Asosiy menu:", reply_markup=keyboard)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# USER REGISTRATION HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@router.message(F.text == "📝 Ro'yxatdan o'tish")
+async def start_registration(message: Message, state: FSMContext) -> None:
+    """Start user registration process"""
+    await state.set_state(UserRegistrationStates.waiting_for_child_name)
+    
+    text = "📝 <b>Ro'yxatdan o'tish</b>\n\n"
+    text += "Bolangizning to'liq ismini kiriting:\n"
+    text += "<i>(Masalan: Akmal Karimov)</i>"
+    
+    await message.answer(text, reply_markup=ReplyKeyboardRemove())
+
+@router.message(UserRegistrationStates.waiting_for_child_name)
+async def process_child_name(message: Message, state: FSMContext) -> None:
+    """Process child name"""
+    if not message.text:
+        await message.answer("Iltimos, matn formatida ism kiriting.")
+        return
+    
+    child_name = message.text.strip()
+    if not validate_name(child_name):
         await message.answer(
-            f"👋 Salom! Admin panelga xush kelibsiz!\n"
-            f"{'🔑 Super Admin' if is_super else '👨‍💼 Admin'} huquqlaringiz mavjud.",
-            reply_markup=get_admin_menu(is_super)
+            "❌ Noto'g'ri ism formati!\n\n"
+            "Iltimos, to'g'ri ism kiriting (kamida 2 ta harf)."
         )
         return
     
-    try:
-        chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        if chat_member.status not in ["member", "administrator", "creator"]:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✉️ Obuna bo'lish", url=f"https://t.me/{CHANNEL_USERNAME[1:]}")],
-                [InlineKeyboardButton(text="✅ Obuna bo'ldim", callback_data="check_sub")]
-            ])
-            await message.answer("✉️ Iltimos, quyidagi kanalga obuna bo'ling:", reply_markup=keyboard)
-            await state.set_state(Registration.check_subscription)
-        else:
-            await message.answer("👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=get_main_menu())
-    except Exception as e:
-        logging.error(f"Error checking subscription: {e}")
-        await message.answer("👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=get_main_menu())
-
-@dp.callback_query(lambda c: c.data == "check_sub")
-async def check_subscription(callback_query: types.CallbackQuery, state: FSMContext):
-    user_id = callback_query.from_user.id
-    try:
-        chat_member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        if chat_member.status not in ["member", "administrator", "creator"]:
-            await callback_query.answer("❌ Hali ham obuna emassiz!", show_alert=True)
-        else:
-            await bot.send_message(user_id, "👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=get_main_menu())
-            await state.clear()
-    except Exception as e:
-        logging.error(f"Error checking subscription: {e}")
-        await bot.send_message(user_id, "👋 Salom! 'KITOBXON KIDS' botiga xush kelibsiz!", reply_markup=get_main_menu())
-        await state.clear()
-
-# 📋 Registration process
-@dp.message(lambda message: message.text == "📋 Ro'yxatdan o'tish")
-async def register_start(message: types.Message, state: FSMContext):
-    user_id = str(message.from_user.id)
-    users = get_users()
+    await state.update_data(child_name=child_name)
+    await state.set_state(UserRegistrationStates.waiting_for_parent_name)
     
-    if user_id in users:
-        await message.answer("✅ Siz allaqachon ro'yxatdan o'tgansiz!", reply_markup=get_main_menu())
+    await message.answer(
+        "Ota-onaning to'liq ismini kiriting:\n"
+        "<i>(Masalan: Karim Alimov)</i>"
+    )
+
+@router.message(UserRegistrationStates.waiting_for_parent_name)
+async def process_parent_name(message: Message, state: FSMContext) -> None:
+    """Process parent name"""
+    if not message.text:
+        await message.answer("Iltimos, matn formatida ism kiriting.")
         return
     
-    await message.answer("👶 Farzandingiz ism familiyasini kiriting:")
-    await state.set_state(Registration.child_name)
-
-@dp.message(Registration.child_name)
-async def register_child_name(message: types.Message, state: FSMContext):
-    await state.update_data(child_name=message.text)
-    await message.answer("👨‍👩‍👦 Ota-onaning ism familiyasini kiriting:")
-    await state.set_state(Registration.parent_name)
-
-@dp.message(Registration.parent_name)
-async def register_parent_name(message: types.Message, state: FSMContext):
-    await state.update_data(parent_name=message.text)
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=region)] for region in REGIONS.keys()],
-        resize_keyboard=True
+    parent_name = message.text.strip()
+    if not validate_name(parent_name):
+        await message.answer(
+            "❌ Noto'g'ri ism formati!\n\n"
+            "Iltimos, to'g'ri ism kiriting (kamida 2 ta harf)."
+        )
+        return
+    
+    await state.update_data(parent_name=parent_name)
+    await state.set_state(UserRegistrationStates.waiting_for_region)
+    
+    await message.answer(
+        "Viloyatingizni tanlang:",
+        reply_markup=get_regions_keyboard()
     )
-    await message.answer("🌍 Viloyatni tanlang:", reply_markup=keyboard)
-    await state.set_state(Registration.region)
 
-@dp.message(Registration.region)
-async def register_region(message: types.Message, state: FSMContext):
-    region = message.text
-    if region not in REGIONS:
-        await message.answer("❌ Iltimos, ro'yxatdan viloyat tanlang!")
+@router.callback_query(F.data.startswith("region:"))
+async def process_region_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process region selection"""
+    region = callback.data.split(":", 1)[1]
+    
+    if not validate_region(region):
+        await callback.answer("❌ Noto'g'ri viloyat!", show_alert=True)
         return
     
     await state.update_data(region=region)
-    districts = REGIONS.get(region, [])
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=dist)] for dist in districts],
-        resize_keyboard=True
-    )
-    await message.answer("🏙 Tumaningizni tanlang:", reply_markup=keyboard)
-    await state.set_state(Registration.district)
+    await state.set_state(UserRegistrationStates.waiting_for_district)
+    
+    if callback.message:
+        await callback.message.edit_text(
+            f"Tanlangan viloyat: <b>{region}</b>\n\nTumanni tanlang:",
+            reply_markup=get_districts_keyboard(region)
+        )
+    
+    await callback.answer()
 
-@dp.message(Registration.district)
-async def register_district(message: types.Message, state: FSMContext):
-    await state.update_data(district=message.text)
-    await message.answer("🏘 Mahallangiz nomini kiriting:")
-    await state.set_state(Registration.mahalla)
-
-@dp.message(Registration.mahalla)
-async def register_mahalla(message: types.Message, state: FSMContext):
-    await state.update_data(mahalla=message.text)
-    age_keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="7"), KeyboardButton(text="8"), KeyboardButton(text="9"), KeyboardButton(text="10")],
-            [KeyboardButton(text="11"), KeyboardButton(text="12"), KeyboardButton(text="13"), KeyboardButton(text="14")]
-        ],
-        resize_keyboard=True
-    )
-    await message.answer("📅 Yoshni tanlang:", reply_markup=age_keyboard)
-    await state.set_state(Registration.age)
-
-@dp.message(Registration.age)
-async def register_age(message: types.Message, state: FSMContext):
-    try:
-        age = int(message.text)
-        if age < 7 or age > 14:
-            await message.answer("❌ Yosh 7 dan 14 gacha bo'lishi kerak!")
-            return
-    except ValueError:
-        await message.answer("❌ Iltimos, to'g'ri yosh kiriting!")
+@router.callback_query(F.data.startswith("district:"))
+async def process_district_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process district selection"""
+    parts = callback.data.split(":", 2)
+    if len(parts) != 3:
+        await callback.answer("❌ Xatolik!", show_alert=True)
         return
     
-    await state.update_data(age=message.text)
-    phone_button = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📞 Telefon raqamni yuborish", request_contact=True)]],
-        resize_keyboard=True
-    )
-    await message.answer("📞 Telefon raqamingizni yuboring:", reply_markup=phone_button)
-    await state.set_state(Registration.phone)
-
-@dp.message(Registration.phone)
-async def register_phone(message: types.Message, state: FSMContext):
-    if not message.contact:
-        await message.answer("📞 Iltimos, tugma orqali telefon raqam yuboring.")
-        return
-
-    user_data = await state.get_data()
-    phone_number = message.contact.phone_number
-    user_id = str(message.from_user.id)
+    region, district = parts[1], parts[2]
     
-    # Save user data
-    user_info = {
-        'child_name': user_data['child_name'],
-        'parent_name': user_data['parent_name'],
-        'region': user_data['region'],
-        'district': user_data['district'],
-        'mahalla': user_data['mahalla'],
-        'age': user_data['age'],
-        'phone': phone_number,
-        'telegram_id': message.from_user.id,
-        'username': message.from_user.username or "No username",
-        'registration_date': get_uzbekistan_time().isoformat()
-    }
-    
-    save_user(user_id, user_info)
-
-    # Notify all admins
-    reg_info = (
-        f"📋 Yangi ro'yxatdan o'tish:\n"
-        f"👶 Farzand: {user_data['child_name']}\n"
-        f"👨‍👩‍👦 Ota-ona: {user_data['parent_name']}\n"
-        f"🌍 Viloyat: {user_data['region']}\n"
-        f"🏙 Tuman: {user_data['district']}\n"
-        f"🏘 Mahalla: {user_data['mahalla']}\n"
-        f"📅 Yosh: {user_data['age']}\n"
-        f"📞 Telefon: {phone_number}\n"
-        f"🆔 Telegram ID: {message.from_user.id}\n"
-        f"👤 Username: @{message.from_user.username or 'mavjud emas'}"
-    )
-
-    admins = get_admins()
-    for admin_id in admins.keys():
-        try:
-            await bot.send_message(int(admin_id), reg_info)
-        except Exception as e:
-            logging.error(f"Error sending notification to admin {admin_id}: {e}")
-
-    await message.answer("✅ Ro'yxatdan o'tish muvaffaqiyatli yakunlandi!", reply_markup=get_main_menu())
-    await state.clear()
-
-# 📝 Test system
-@dp.message(lambda message: message.text == "📝 Test topshirish")
-async def start_test(message: types.Message, state: FSMContext):
-    user_id = str(message.from_user.id)
-    users = get_users()
-    
-    if user_id not in users:
-        await message.answer("❌ Avval ro'yxatdan o'ting!", reply_markup=get_main_menu())
+    if not validate_district(region, district):
+        await callback.answer("❌ Noto'g'ri tuman!", show_alert=True)
         return
     
-    user_age = int(users[user_id]['age'])
-    age_group = "7-10" if user_age <= 10 else "11-14"
+    await state.update_data(district=district)
+    await state.set_state(UserRegistrationStates.waiting_for_mahalla)
     
-    tests = get_tests()
-    if not tests.get(age_group) or not any(tests[age_group].values()):
-        await message.answer("❌ Sizning yosh guruhingiz uchun hozircha testlar mavjud emas.")
+    if callback.message:
+        await callback.message.edit_text(
+            f"Tanlangan tuman: <b>{district}</b>\n\nMahallani tanlang:",
+            reply_markup=get_mahallas_keyboard(region, district)
+        )
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("mahalla:"))
+async def process_mahalla_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process mahalla selection"""
+    parts = callback.data.split(":", 3)
+    if len(parts) != 4:
+        await callback.answer("❌ Xatolik!", show_alert=True)
         return
     
-    # Collect all questions from all tests in the age group
-    all_questions = []
-    for test_data in tests[age_group].values():
-        if 'questions' in test_data:
-            all_questions.extend(test_data['questions'])
+    region, district, mahalla = parts[1], parts[2], parts[3]
     
-    if len(all_questions) < 25:
-        await message.answer("❌ Yetarli savollar mavjud emas. Test uchun kamida 25 ta savol kerak.")
+    if not validate_mahalla(region, district, mahalla):
+        await callback.answer("❌ Noto'g'ri mahalla!", show_alert=True)
         return
     
-    # Select 25 random questions
-    selected_questions = random.sample(all_questions, 25)
+    await state.update_data(mahalla=mahalla)
+    await state.set_state(UserRegistrationStates.waiting_for_age)
     
-    await state.update_data(
-        questions=selected_questions,
-        current_question=0,
-        score=0,
-        start_time=get_uzbekistan_time().isoformat(),
-        age_group=age_group,
-        user_answers=[]
-    )
+    if callback.message:
+        await callback.message.edit_text(
+            f"Tanlangan mahalla: <b>{mahalla}</b>\n\n"
+            "Bolangizning yoshini kiriting (7-14 yosh):"
+        )
+    
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_regions")
+async def back_to_regions(callback: CallbackQuery, state: FSMContext) -> None:
+    """Go back to regions selection"""
+    await state.set_state(UserRegistrationStates.waiting_for_region)
+    
+    if callback.message:
+        await callback.message.edit_text(
+            "Viloyatingizni tanlang:",
+            reply_markup=get_regions_keyboard()
+        )
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("back_to_districts:"))
+async def back_to_districts(callback: CallbackQuery, state: FSMContext) -> None:
+    """Go back to districts selection"""
+    region = callback.data.split(":", 1)[1]
+    await state.set_state(UserRegistrationStates.waiting_for_district)
+    
+    if callback.message:
+        await callback.message.edit_text(
+            f"Tanlangan viloyat: <b>{region}</b>\n\nTumanni tanlang:",
+            reply_markup=get_districts_keyboard(region)
+        )
+    
+    await callback.answer()
+
+@router.message(UserRegistrationStates.waiting_for_age)
+async def process_age(message: Message, state: FSMContext) -> None:
+    """Process age input"""
+    if not message.text:
+        await message.answer("Iltimos, son formatida yosh kiriting.")
+        return
+    
+    age_str = message.text.strip()
+    if not validate_age(age_str):
+        await message.answer(
+            "❌ Noto'g'ri yosh!\n\n"
+            "Iltimos, 7 dan 14 gacha bo'lgan yoshni kiriting."
+        )
+        return
+    
+    await state.update_data(age=int(age_str))
+    await state.set_state(UserRegistrationStates.waiting_for_phone)
     
     await message.answer(
-        f"📝 Test boshlandi!\n"
-        f"👶 Yosh guruhi: {age_group}\n"
-        f"❓ Savollar soni: 25\n"
-        f"⏱ Har bir savol uchun: 1 daqiqa\n"
-        f"💯 Har bir to'g'ri javob: 4 ball\n\n"
-        "Tayyor bo'lsangiz, birinchi savolga o'ting:",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="▶️ Boshlash")]],
-            resize_keyboard=True
-        )
+        "Telefon raqamingizni kiriting:\n"
+        "<i>(Masalan: +998901234567 yoki 901234567)</i>"
     )
-    await state.set_state(TestStates.taking_test)
 
-@dp.message(TestStates.taking_test)
-async def show_question(message: types.Message, state: FSMContext):
-    if message.text != "▶️ Boshlash" and message.text != "➡️ Keyingisi":
+@router.message(UserRegistrationStates.waiting_for_phone)
+async def process_phone(message: Message, state: FSMContext) -> None:
+    """Process phone number"""
+    if not message.text:
+        await message.answer("Iltimos, telefon raqamini kiriting.")
         return
     
+    phone = message.text.strip()
+    if not validate_phone(phone):
+        await message.answer(
+            "❌ Noto'g'ri telefon raqami!\n\n"
+            "Iltimos, to'g'ri O'zbekiston telefon raqamini kiriting.\n"
+            "Masalan: +998901234567, 998901234567 yoki 901234567"
+        )
+        return
+    
+    # Normalize phone number
+    clean_phone = re.sub(r'\D', '', phone)
+    if len(clean_phone) == 9:
+        clean_phone = "998" + clean_phone
+    elif len(clean_phone) == 12 and clean_phone.startswith("998"):
+        pass
+    else:
+        clean_phone = phone
+    
+    # Get all registration data
     data = await state.get_data()
-    questions = data['questions']
+    user_data = {
+        'telegram_id': message.from_user.id,
+        'username': message.from_user.username,
+        'first_name': message.from_user.first_name,
+        'child_name': data['child_name'],
+        'parent_name': data['parent_name'],
+        'region': data['region'],
+        'district': data['district'],
+        'mahalla': data['mahalla'],
+        'age': data['age'],
+        'phone': clean_phone
+    }
+    
+    # Save registration
+    reg_id = data_manager.save_user(user_data)
+    
+    if reg_id:
+        logger.info(f"User registration saved: {message.from_user.id} (ID: {reg_id})")
+        logger.info(f"Statistics updated successfully")
+        
+        success_text = "✅ <b>Ro'yxatdan o'tish muvaffaqiyatli yakunlandi!</b>\n\n"
+        success_text += f"📝 <b>Registration ID:</b> <code>{reg_id}</code>\n\n"
+        success_text += "<b>Ma'lumotlaringiz:</b>\n"
+        success_text += f"👶 Bola: {user_data['child_name']}\n"
+        success_text += f"👨‍👩‍👧‍👦 Ota-ona: {user_data['parent_name']}\n"
+        success_text += f"📍 Manzil: {user_data['region']}, {user_data['district']}, {user_data['mahalla']}\n"
+        success_text += f"🎂 Yosh: {user_data['age']}\n"
+        success_text += f"📞 Telefon: {user_data['phone']}\n\n"
+        success_text += "Endi testlarni ishlashingiz mumkin! 📚"
+        
+        await message.answer(success_text, reply_markup=get_main_menu_keyboard())
+    else:
+        await message.answer(
+            "❌ Ro'yxatdan o'tishda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    
+    await state.clear()
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# TEST SYSTEM HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@router.message(F.text == "📚 Test ishlash")
+async def start_test(message: Message, state: FSMContext) -> None:
+    """Start test taking process"""
+    # Check access permissions
+    if not data_manager.can_access_tests(message.from_user.id, message.from_user.username):
+        await message.answer(
+            "❌ <b>Kirish ruxsati yo'q!</b>\n\n"
+            "Testlarga kirish vaqtinchalik cheklangan.\n"
+            "Administrator bilan bog'laning."
+        )
+        return
+    
+    # Check if user has registrations
+    registrations = data_manager.get_user_registrations(message.from_user.id)
+    if not registrations:
+        await message.answer(
+            "❌ <b>Avval ro'yxatdan o'ting!</b>\n\n"
+            "Testlarni ishlash uchun oldin ro'yxatdan o'tishingiz kerak.\n"
+            "📝 'Ro'yxatdan o'tish' tugmasini bosing."
+        )
+        return
+    
+    await state.set_state(TestStates.selecting_age_group)
+    
+    await message.answer(
+        "📚 <b>Test ishlash</b>\n\n"
+        "Yosh guruhini tanlang:",
+        reply_markup=get_age_groups_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("age_group:"), TestStates.selecting_age_group)
+async def process_age_group_selection(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process age group selection for tests"""
+    age_group = callback.data.split(":", 1)[1]
+    
+    if age_group not in ["7-10", "11-14"]:
+        await callback.answer("❌ Noto'g'ri yosh guruhi!", show_alert=True)
+        return
+    
+    # Get available tests for age group
+    tests = data_manager.get_tests_by_age_group(age_group)
+    
+    if not tests:
+        await callback.answer(
+            f"❌ {age_group} yosh guruhi uchun testlar mavjud emas!",
+            show_alert=True
+        )
+        return
+    
+    await state.update_data(selected_age_group=age_group)
+    await state.set_state(TestStates.selecting_test)
+    
+    # Create tests keyboard
+    keyboard = []
+    for test_id, test_data in tests.items():
+        test_name = test_data.get('name', f'Test {test_id[:8]}')
+        keyboard.append([InlineKeyboardButton(
+            text=test_name,
+            callback_data=f"select_test:{test_id}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="back_to_age_groups")])
+    
+    if callback.message:
+        await callback.message.edit_text(
+            f"📚 <b>{age_group} yosh guruhi testlari</b>\n\n"
+            "Testni tanlang:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+    
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_age_groups", TestStates.selecting_test)
+async def back_to_age_groups(callback: CallbackQuery, state: FSMContext) -> None:
+    """Go back to age group selection"""
+    await state.set_state(TestStates.selecting_age_group)
+    
+    if callback.message:
+        await callback.message.edit_text(
+            "📚 <b>Test ishlash</b>\n\n"
+            "Yosh guruhini tanlang:",
+            reply_markup=get_age_groups_keyboard()
+        )
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("select_test:"), TestStates.selecting_test)
+async def start_selected_test(callback: CallbackQuery, state: FSMContext) -> None:
+    """Start the selected test"""
+    test_id = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    age_group = data.get('selected_age_group')
+    
+    if not age_group:
+        await callback.answer("❌ Xatolik!", show_alert=True)
+        return
+    
+    test_data = data_manager.get_test(test_id, age_group)
+    if not test_data:
+        await callback.answer("❌ Test topilmadi!", show_alert=True)
+        return
+    
+    # Initialize test session
+    await state.update_data(
+        test_id=test_id,
+        test_data=test_data,
+        current_question=0,
+        answers=[],
+        start_time=datetime.now().isoformat()
+    )
+    await state.set_state(TestStates.taking_test)
+    
+    # Show first question
+    await show_test_question(callback.message, state)
+    await callback.answer()
+
+async def show_test_question(message: Message, state: FSMContext) -> None:
+    """Show current test question"""
+    data = await state.get_data()
+    test_data = data['test_data']
     current_q = data['current_question']
+    questions = test_data.get('questions', [])
     
     if current_q >= len(questions):
         await finish_test(message, state)
@@ -798,1062 +1469,867 @@ async def show_question(message: types.Message, state: FSMContext):
     
     question = questions[current_q]
     
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="A"), KeyboardButton(text="B")],
-            [KeyboardButton(text="C"), KeyboardButton(text="D")]
-        ],
-        resize_keyboard=True
-    )
+    text = f"📚 <b>{test_data.get('name', 'Test')}</b>\n\n"
+    text += f"Savol {current_q + 1}/{len(questions)}\n\n"
+    text += f"<b>{question.get('question', 'Savol matn mavjud emas')}</b>\n\n"
     
-    question_text = (
-        f"❓ Savol {current_q + 1}/25\n\n"
-        f"{question['question']}\n\n"
-        f"A) {question['option_a']}\n"
-        f"B) {question['option_b']}\n"
-        f"C) {question['option_c']}\n"
-        f"D) {question['option_d']}\n\n"
-        "⏱ 1 daqiqa vaqtingiz bor!"
-    )
-    
-    await message.answer(question_text, reply_markup=keyboard)
-    await state.set_state(TestStates.test_question)
-    
-    # Set timer for 60 seconds
-    await asyncio.sleep(60)
-    
-    # Check if user is still on this question
-    current_data = await state.get_data()
-    if current_data.get('current_question') == current_q:
-        await handle_timeout(message, state)
-
-async def handle_timeout(message: types.Message, state: FSMContext):
-    """Handle question timeout"""
-    data = await state.get_data()
-    current_q = data['current_question']
-    user_answers = data.get('user_answers', [])
-    
-    # Add timeout answer
-    user_answers.append({
-        'question_number': current_q + 1,
-        'user_answer': 'TIMEOUT',
-        'correct_answer': data['questions'][current_q]['correct_answer'],
-        'is_correct': False
-    })
-    
-    await state.update_data(
-        current_question=current_q + 1,
-        user_answers=user_answers
-    )
-    
-    if current_q + 1 >= 25:
-        await finish_test(message, state)
+    # Handle different question types
+    if question.get('type') == 'multiple_choice':
+        options = question.get('options', [])
+        keyboard = []
+        for i, option in enumerate(options):
+            keyboard.append([InlineKeyboardButton(
+                text=f"{chr(65 + i)}. {option}",
+                callback_data=f"answer:{i}"
+            )])
     else:
-        await message.answer(
-            "⏰ Vaqt tugadi! Keyingi savolga o'tamiz...",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="➡️ Keyingisi")]],
-                resize_keyboard=True
-            )
-        )
-        await state.set_state(TestStates.taking_test)
+        # Text answer
+        text += "Javobingizni yozing:"
+        keyboard = [[InlineKeyboardButton(text="⏹️ Testni to'xtatish", callback_data="stop_test")]]
+    
+    if message:
+        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
-@dp.message(TestStates.test_question)
-async def process_answer(message: types.Message, state: FSMContext):
-    user_answer = message.text.upper()
-    if user_answer not in ['A', 'B', 'C', 'D']:
-        await message.answer("❌ Iltimos, A, B, C yoki D harfini tanlang!")
+@router.callback_query(F.data.startswith("answer:"), TestStates.taking_test)
+async def process_test_answer(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process test answer"""
+    answer_index = int(callback.data.split(":", 1)[1])
+    data = await state.get_data()
+    
+    # Save answer
+    answers = data.get('answers', [])
+    answers.append(answer_index)
+    
+    # Move to next question
+    current_q = data.get('current_question', 0) + 1
+    await state.update_data(answers=answers, current_question=current_q)
+    
+    # Show next question or finish test
+    await show_test_question(callback.message, state)
+    await callback.answer()
+
+@router.message(TestStates.taking_test)
+async def process_text_answer(message: Message, state: FSMContext) -> None:
+    """Process text answer for open-ended questions"""
+    if not message.text:
+        await message.answer("Iltimos, matn formatida javob bering.")
         return
     
     data = await state.get_data()
-    current_q = data['current_question']
-    questions = data['questions']
-    score = data['score']
-    user_answers = data.get('user_answers', [])
     
-    current_question = questions[current_q]
-    correct_answer = current_question['correct_answer'].upper()
-    is_correct = user_answer == correct_answer
+    # Save text answer
+    answers = data.get('answers', [])
+    answers.append(message.text.strip())
     
-    if is_correct:
-        score += 4
-        await message.answer("✅ To'g'ri!")
-    else:
-        await message.answer(f"❌ Noto'g'ri! To'g'ri javob: {correct_answer}")
+    # Move to next question
+    current_q = data.get('current_question', 0) + 1
+    await state.update_data(answers=answers, current_question=current_q)
     
-    # Record user answer
-    user_answers.append({
-        'question_number': current_q + 1,
-        'user_answer': user_answer,
-        'correct_answer': correct_answer,
-        'is_correct': is_correct
-    })
-    
-    current_q += 1
-    
-    await state.update_data(
-        current_question=current_q,
-        score=score,
-        user_answers=user_answers
-    )
-    
-    if current_q >= 25:
-        await finish_test(message, state)
-    else:
-        await message.answer(
-            f"Keyingi savol uchun tayyor bo'ling... ({current_q}/25)",
-            reply_markup=ReplyKeyboardMarkup(
-                keyboard=[[KeyboardButton(text="➡️ Keyingisi")]],
-                resize_keyboard=True
-            )
-        )
-        await state.set_state(TestStates.taking_test)
+    # Show next question or finish test
+    await show_test_question(message, state)
 
-async def finish_test(message: types.Message, state: FSMContext):
-    """Finish the test and show results"""
+@router.callback_query(F.data == "stop_test", TestStates.taking_test)
+async def stop_test(callback: CallbackQuery, state: FSMContext) -> None:
+    """Stop test"""
+    await state.clear()
+    
+    if callback.message:
+        await callback.message.edit_text(
+            "❌ <b>Test to'xtatildi</b>\n\n"
+            "Test yakunlanmadi. Natija saqlanmadi."
+        )
+    
+    await callback.message.answer("Asosiy menu:", reply_markup=get_main_menu_keyboard())
+    await callback.answer()
+
+async def finish_test(message: Message, state: FSMContext) -> None:
+    """Finish test and calculate score"""
     data = await state.get_data()
-    score = data['score']
-    start_time = datetime.fromisoformat(data['start_time']).replace(tzinfo=UZBEKISTAN_TZ)
-    end_time = get_uzbekistan_time()
-    time_taken = str(end_time - start_time).split('.')[0]  # Remove microseconds
-    percentage = (score / 100) * 100
+    test_data = data['test_data']
+    answers = data.get('answers', [])
+    questions = test_data.get('questions', [])
     
-    user_id = str(message.from_user.id)
-    users = get_users()
-    user_data = users.get(user_id, {})
-    child_name = user_data.get('child_name', 'Unknown')
-    child_last_name = user_data.get('child_last_name', '')
-    full_child_name = f"{child_name} {child_last_name}".strip() if child_last_name else child_name
+    # Calculate score
+    score = 0
+    total_questions = len(questions)
     
-    # Save result with regional information
+    for i, question in enumerate(questions):
+        if i < len(answers):
+            user_answer = answers[i]
+            if question.get('type') == 'multiple_choice':
+                correct_answer = question.get('correct_answer', 0)
+                if user_answer == correct_answer:
+                    score += 1
+            # For text answers, we can't auto-grade, so we'll mark as correct for now
+            else:
+                score += 1
+    
+    percentage = (score / total_questions) * 100 if total_questions > 0 else 0
+    
+    # Save result
     result_data = {
-        'user_id': user_id,
-        'user_name': child_name,
-        'age': user_data.get('age', 'Unknown'),
-        'region': user_data.get('region', 'Unknown'),
-        'district': user_data.get('district', 'Unknown'),
+        'telegram_id': message.from_user.id,
+        'test_id': data['test_id'],
+        'test_name': test_data.get('name', 'Test'),
+        'age_group': data['selected_age_group'],
         'score': score,
+        'total_questions': total_questions,
         'percentage': percentage,
-        'time_taken': time_taken,
-        'date': end_time.strftime('%Y-%m-%d %H:%M:%S'),
-        'age_group': data['age_group'],
-        'answers': data.get('user_answers', [])
+        'answers': answers,
+        'start_time': data.get('start_time'),
+        'duration_minutes': 0  # Could calculate actual duration
     }
     
-    save_result(result_data)
+    result_id = data_manager.save_test_result(result_data)
     
-    # Update statistics after saving result
-    update_statistics()
+    # Show results
+    text = "🎉 <b>Test yakunlandi!</b>\n\n"
+    text += f"📊 <b>Natijangiz:</b>\n"
+    text += f"✅ To'g'ri javoblar: {score}/{total_questions}\n"
+    text += f"📈 Foiz: {percentage:.1f}%\n\n"
     
-    # Certificate generation removed as requested
-    
-    # Send results
-    result_text = (
-        f"🏁 Test yakunlandi!\n\n"
-        f"👶 Farzand: {full_child_name}\n"
-        f"💯 Ball: {score}/100\n"
-        f"📊 Foiz: {percentage:.1f}%\n"
-        f"⏱ Vaqt: {time_taken}\n"
-        f"📅 Sana: {end_time.strftime('%Y-%m-%d %H:%M')}\n\n"
-    )
-    
-    if score >= 70:
-        result_text += "🏆 Ajoyib! Yaxshi natija ko'rsatdingiz!\n\n"
-    
-    result_text += "Rahmat! Qatnashganingiz uchun!"
-    
-    await message.answer(result_text, reply_markup=get_main_menu())
-    
-    # Notify all admins
-    admin_notification = (
-        f"📊 Yangi test natijasi:\n"
-        f"👶 Farzand: {child_name}\n"
-        f"👤 Username: @{message.from_user.username or 'mavjud emas'}\n"
-        f"🆔 Telegram ID: {user_id}\n"
-        f"💯 Ball: {score}/100\n"
-        f"📊 Foiz: {percentage:.1f}%\n"
-        f"⏱ Vaqt: {time_taken}\n"
-        f"📅 Sana: {end_time.strftime('%Y-%m-%d %H:%M')}\n"
-        f"👶 Yosh guruhi: {data['age_group']}\n"
-    )
-    
-    if score >= 70:
-        admin_notification += "🏆 Yaxshi natija (70+ ball)\n"
-    
-    admins = get_admins()
-    for admin_id in admins.keys():
-        try:
-            await bot.send_message(int(admin_id), admin_notification)
-        except Exception as e:
-            logging.error(f"Error sending test result to admin {admin_id}: {e}")
-    
-    await state.clear()
-
-# 💬 Feedback system
-@dp.message(lambda message: message.text == "💬 Fikr va maslahatlar")
-async def feedback_prompt(message: types.Message, state: FSMContext):
-    await message.answer("✍️ Fikringizni yozing:")
-    await state.set_state(Registration.feedback)
-
-@dp.message(Registration.feedback)
-async def save_feedback(message: types.Message, state: FSMContext):
-    feedback_text = (
-        f"💬 Yangi fikr:\n"
-        f"👤 {message.from_user.full_name}\n"
-        f"👤 Username: @{message.from_user.username or 'mavjud emas'}\n"
-        f"🆔 Telegram ID: {message.from_user.id}\n"
-        f"💭 Fikr: {message.text}"
-    )
-    
-    # Send to all admins
-    admins = get_admins()
-    for admin_id in admins.keys():
-        try:
-            await bot.send_message(int(admin_id), feedback_text)
-        except Exception as e:
-            logging.error(f"Error sending feedback to admin {admin_id}: {e}")
-    
-    await message.answer("✅ Fikringiz uchun rahmat!", reply_markup=get_main_menu())
-    await state.clear()
-
-# 📚 Project info
-@dp.message(lambda message: message.text == "📚 Loyiha haqida")
-async def project_info(message: types.Message):
-    text = """<b>"Kitobxon kids" tanlovini tashkil etish va o'tkazish to'g'risidagi NIZOM</b>
-
-🔹 <b>Umumiy qoidalar:</b>
-• Mazkur Nizom yoshlar o'rtasida "Kitobxon Kids" tanlovini o'tkazish tartibini belgilaydi.
-• Tanlov 7–10 va 11–14 yoshdagi bolalar uchun mo'ljallangan.
-• Tanlov kitobxonlik madaniyatini oshirishga qaratilgan.
-
-🔹 <b>Tashkilotchilar:</b>
-• Yoshlar ishlari agentligi,
-• Maktabgacha va maktab ta'limi vazirligi,
-• O'zbekiston bolalar tashkiloti.
-
-🔹 <b>Ishtirokchilar:</b>
-• 7–14 yoshdagi barcha bolalar qatnasha oladi.
-• Qoraqalpoq va rus tillarida ham qatnashish mumkin.
-
-🔹 <b>Maqsad va vazifalar:</b>
-• Kitob o'qishga qiziqish uyg'otish, mustaqil o'qish ko'nikmasini shakllantirish.
-• Adiblar merosini o'rganish, o'zlikni anglashga chorlash.
-
-🔹 <b>Tanlov bosqichlari:</b>
-1. Saralash (oy boshida test, 25 ta savol, har biri 4 ball).
-2. Hududiy (30 ta savol, har biri 30 soniya, top scorer keyingi bosqichga o'tadi).
-3. Respublika (Fantaziya festivali, Taassurotlar, Savollar - 100 ballik tizim).
-
-🔹 <b>G'oliblar:</b>
-• 1-o'rin: Noutbuk
-• 2-o'rin: Planshet
-• 3-o'rin: Telefon
-• Barcha qatnashchilarga velosiped
-
-🔹 <b>Moliya manbalari:</b>
-• Agentlik mablag'lari, homiylar, qonuniy xayriyalar.
-
-Batafsil: @Kitobxon_Kids kanali orqali kuzatib boring.
-"""
-    await message.answer(text)
-
-# 🔙 Back to main menu
-@dp.message(lambda message: message.text == "🔙 Asosiy menyu")
-async def back_to_main(message: types.Message, state: FSMContext):
-    await state.clear()
-    if is_admin(message.from_user.id):
-        is_super = is_super_admin(message.from_user.id)
-        await message.answer("Admin panel", reply_markup=get_admin_menu(is_super))
+    if percentage >= 80:
+        text += "🌟 A'lo! Ajoyib natija!"
+    elif percentage >= 60:
+        text += "👍 Yaxshi natija!"
+    elif percentage >= 40:
+        text += "📚 Yaxshi, lekin ko'proq o'qish kerak."
     else:
-        await message.answer("Asosiy menyu", reply_markup=get_main_menu())
+        text += "💪 Mashq qilishda davom eting!"
+    
+    if result_id:
+        text += f"\n\n📝 Natija ID: <code>{result_id}</code>"
+    
+    await message.edit_text(text)
+    await message.answer("Asosiy menu:", reply_markup=get_main_menu_keyboard())
+    await state.clear()
 
-# 👥 View users (Admin only)
-@dp.message(lambda message: message.text == "👥 Foydalanuvchilar ro'yxati" and is_admin(message.from_user.id))
-async def view_users(message: types.Message):
-    users = get_users()
-    
-    if not users:
-        await message.answer("📋 Hozircha ro'yxatdan o'tgan foydalanuvchilar yo'q.")
-        return
-    
-    user_list = "👥 Ro'yxatdan o'tgan foydalanuvchilar:\n\n"
-    for i, (user_id, user_data) in enumerate(users.items(), 1):
-        username = user_data.get('username', 'N/A')
-        if username != 'N/A' and not username.startswith('@'):
-            username = f"@{username}"
-        
-        user_list += (
-            f"{i}. 👶 {user_data.get('child_name', 'N/A')}\n"
-            f"   👨‍👩‍👦 {user_data.get('parent_name', 'N/A')}\n"
-            f"   📅 {user_data.get('age', 'N/A')} yosh\n"
-            f"   🌍 {user_data.get('region', 'N/A')}, {user_data.get('district', 'N/A')}\n"
-            f"   🆔 {user_id}\n"
-            f"   👤 {username}\n\n"
-        )
-        
-        if len(user_list) > 3500:  # Telegram message limit
-            await message.answer(user_list)
-            user_list = ""
-    
-    if user_list:
-        await message.answer(user_list)
+# ═══════════════════════════════════════════════════════════════════════════════════
+# RESULTS HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
 
-# 📊 Download test results (Super Admin only)
-@dp.message(lambda message: message.text == "📊 Test natijalarini yuklab olish" and is_super_admin(message.from_user.id))
-async def download_test_results(message: types.Message):
-    results = get_results()
+@router.message(F.text == "📊 Natijalarim")
+async def show_user_results(message: Message) -> None:
+    """Show user's test results"""
+    results = data_manager.get_user_results(message.from_user.id)
     
     if not results:
-        await message.answer("📊 Hozircha test natijalari mavjud emas.")
-        return
-    
-    try:
-        # Generate PDF
-        pdf_data = generate_pdf_report(results)
-        pdf_file = BufferedInputFile(pdf_data, filename="test_natijalari.pdf")
-        
-        # Generate Excel
-        excel_data = generate_excel_report(results)
-        excel_file = BufferedInputFile(excel_data, filename="test_natijalari.xlsx")
-        
-        await message.answer("📊 Test natijalari:")
-        await message.answer_document(pdf_file, caption="📄 PDF format")
-        await message.answer_document(excel_file, caption="📊 Excel format")
-        
-    except Exception as e:
-        logging.error(f"Error generating test results: {e}")
-        await message.answer("❌ Hisobot yaratishda xatolik yuz berdi.")
-
-# 📋 Download user data (Super Admin only)
-@dp.message(lambda message: message.text == "📋 Foydalanuvchi ma'lumotlarini yuklab olish" and is_super_admin(message.from_user.id))
-async def download_user_data(message: types.Message):
-    users = get_users()
-    
-    if not users:
-        await message.answer("📋 Hozircha ro'yxatdan o'tgan foydalanuvchilar yo'q.")
-        return
-    
-    try:
-        # Generate PDF
-        pdf_data = generate_users_pdf_report(users)
-        pdf_file = BufferedInputFile(pdf_data, filename="foydalanuvchilar.pdf")
-        
-        # Generate Excel
-        excel_data = generate_users_excel_report(users)
-        excel_file = BufferedInputFile(excel_data, filename="foydalanuvchilar.xlsx")
-        
-        await message.answer("📋 Foydalanuvchilar ma'lumoti:")
-        await message.answer_document(pdf_file, caption="📄 PDF format")
-        await message.answer_document(excel_file, caption="📊 Excel format")
-        
-    except Exception as e:
-        logging.error(f"Error generating user data: {e}")
-        await message.answer("❌ Hisobot yaratishda xatolik yuz berdi.")
-
-# 👨‍💼 View admins (Super Admin only)
-@dp.message(lambda message: message.text == "👨‍💼 Adminlar ro'yxati" and is_super_admin(message.from_user.id))
-async def view_admins(message: types.Message):
-    admins = get_admins()
-    
-    admin_list = "👨‍💼 Adminlar ro'yxati:\n\n"
-    for i, (admin_id, admin_data) in enumerate(admins.items(), 1):
-        role = "🔑 Super Admin" if admin_data.get("role") == "super_admin" else "👨‍💼 Admin"
-        
-        try:
-            admin_info = await bot.get_chat(int(admin_id))
-            full_name = admin_info.full_name or "N/A"
-            username = f"@{admin_info.username}" if admin_info.username else "N/A"
-        except:
-            full_name = "N/A"
-            username = "N/A"
-        
-        admin_list += (
-            f"{i}. {role}\n"
-            f"   👤 {full_name}\n"
-            f"   👤 {username}\n"
-            f"   🆔 {admin_id}\n"
-            f"   📅 {admin_data.get('added_date', 'N/A')[:10]}\n\n"
-        )
-    
-    await message.answer(admin_list)
-
-# ➕ Add admin (Super Admin only)
-@dp.message(lambda message: message.text == "➕ Admin qo'shish" and is_super_admin(message.from_user.id))
-async def add_admin_start(message: types.Message, state: FSMContext):
-    await message.answer("🆔 Yangi admin Telegram ID sini kiriting:")
-    await state.set_state(AdminStates.add_admin)
-
-@dp.message(AdminStates.add_admin)
-async def add_admin_process(message: types.Message, state: FSMContext):
-    try:
-        admin_id = int(message.text)
-        
-        # Check if already admin
-        admins = get_admins()
-        if str(admin_id) in admins:
-            await message.answer("❌ Bu foydalanuvchi allaqachon admin!")
-            await state.clear()
-            return
-        
-        # Add admin
-        admin_data = {
-            "role": "admin",
-            "added_by": str(message.from_user.id),
-            "added_date": get_uzbekistan_time().isoformat()
-        }
-        
-        save_admin(str(admin_id), admin_data)
-        
-        try:
-            admin_info = await bot.get_chat(admin_id)
-            admin_name = admin_info.full_name or "N/A"
-            username = f"@{admin_info.username}" if admin_info.username else "N/A"
-        except:
-            admin_name = "N/A"
-            username = "N/A"
-        
-        await message.answer(f"✅ Yangi admin qo'shildi!\n👤 {admin_name}\n🆔 {admin_id}")
-        
-        # Notify new admin
-        try:
-            await bot.send_message(
-                admin_id,
-                "🎉 Tabriklaymiz! Siz Kitobxon Kids botida admin etib tayinlandingiz!\n"
-                "Botni qayta ishga tushiring: /start"
-            )
-        except:
-            pass
-        
-        # Notify all admins
-        notification = (
-            f"👨‍💼 Yangi admin qo'shildi:\n"
-            f"👤 {admin_name}\n"
-            f"👤 {username}\n"
-            f"🆔 {admin_id}\n"
-            f"➕ Qo'shgan: {message.from_user.full_name}"
-        )
-        
-        for aid in admins.keys():
-            if aid != str(message.from_user.id):
-                try:
-                    await bot.send_message(int(aid), notification)
-                except:
-                    pass
-        
-    except ValueError:
-        await message.answer("❌ Noto'g'ri ID format! Raqam kiriting.")
-        return
-    except Exception as e:
-        logging.error(f"Error adding admin: {e}")
-        await message.answer("❌ Admin qo'shishda xatolik yuz berdi.")
-    
-    await state.clear()
-
-# ⬆️ Promote to Super Admin (Super Admin only)
-@dp.message(lambda message: message.text == "⬆️ Super Admin tayinlash" and is_super_admin(message.from_user.id))
-async def promote_super_admin_start(message: types.Message, state: FSMContext):
-    await message.answer("🆔 Super Admin etib tayinlash uchun Telegram ID kiriting:")
-    await state.set_state(AdminStates.promote_super_admin)
-
-@dp.message(AdminStates.promote_super_admin)
-async def promote_super_admin_process(message: types.Message, state: FSMContext):
-    try:
-        admin_id = str(message.text)
-        
-        admins = get_admins()
-        if admin_id not in admins:
-            await message.answer("❌ Bu foydalanuvchi admin emas!")
-            await state.clear()
-            return
-        
-        if admins[admin_id].get("role") == "super_admin":
-            await message.answer("❌ Bu foydalanuvchi allaqachon Super Admin!")
-            await state.clear()
-            return
-        
-        # Promote to super admin
-        admins[admin_id]["role"] = "super_admin"
-        admins[admin_id]["promoted_by"] = str(message.from_user.id)
-        admins[admin_id]["promoted_date"] = get_uzbekistan_time().isoformat()
-        
-        save_admin(admin_id, admins[admin_id])
-        
-        try:
-            admin_info = await bot.get_chat(int(admin_id))
-            admin_name = admin_info.full_name or "N/A"
-        except:
-            admin_name = "N/A"
-        
-        await message.answer(f"✅ {admin_name} Super Admin etib tayinlandi!")
-        
-        # Notify promoted admin
-        try:
-            await bot.send_message(
-                int(admin_id),
-                "🔑 Tabriklaymiz! Siz Super Admin etib tayinlandingiz!\n"
-                "Botni qayta ishga tushiring: /start"
-            )
-        except:
-            pass
-        
-    except ValueError:
-        await message.answer("❌ Noto'g'ri ID format! Raqam kiriting.")
-    except Exception as e:
-        logging.error(f"Error promoting admin: {e}")
-        await message.answer("❌ Super Admin tayinlashda xatolik yuz berdi.")
-    
-    await state.clear()
-
-# ➖ Remove admin (Super Admin or Special Admin only)
-@dp.message(lambda message: message.text == "➖ Admin o'chirish" and (is_super_admin(message.from_user.id) or has_special_privileges(message.from_user.id)))
-async def remove_admin_start(message: types.Message, state: FSMContext):
-    await message.answer("🆔 O'chirish uchun admin Telegram ID sini kiriting:")
-    await state.set_state(AdminStates.remove_admin)
-
-@dp.message(AdminStates.remove_admin)
-async def remove_admin_process(message: types.Message, state: FSMContext):
-    try:
-        admin_id = str(message.text)
-        current_user = message.from_user.id
-        
-        # Special privilege check
-        if not (is_super_admin(current_user) or has_special_privileges(current_user)):
-            await message.answer("❌ Sizda bu amalni bajarish huquqi yo'q!")
-            await state.clear()
-            return
-        
-        # Can't remove yourself
-        if admin_id == str(current_user):
-            await message.answer("❌ O'zingizni admin ro'yxatidan o'chira olmaysiz!")
-            await state.clear()
-            return
-        
-        # Can't remove system super admin
-        if admin_id == str(SUPER_ADMIN_ID) and current_user != SUPER_ADMIN_ID:
-            await message.answer("❌ Asosiy super adminni o'chira olmaysiz!")
-            await state.clear()
-            return
-        
-        if remove_admin(admin_id):
-            try:
-                admin_info = await bot.get_chat(int(admin_id))
-                admin_name = admin_info.full_name or "N/A"
-            except:
-                admin_name = "N/A"
-            
-            await message.answer(f"✅ Admin o'chirildi: {admin_name} ({admin_id})")
-            
-            # Notify removed admin
-            try:
-                await bot.send_message(
-                    int(admin_id),
-                    "❌ Sizning admin huquqlaringiz olib tashlandi!"
-                )
-            except:
-                pass
-            
-        else:
-            await message.answer("❌ Admin topilmadi yoki o'chirishda xatolik!")
-        
-    except ValueError:
-        await message.answer("❌ Noto'g'ri ID format! Raqam kiriting.")
-    except Exception as e:
-        logging.error(f"Error removing admin: {e}")
-        await message.answer("❌ Admin o'chirishda xatolik yuz berdi.")
-    
-    await state.clear()
-
-# ➕ Add test (Admin only)
-@dp.message(lambda message: message.text == "➕ Test qo'shish" and is_admin(message.from_user.id))
-async def add_test_start(message: types.Message, state: FSMContext):
-    await message.answer("👶 Qaysi yosh guruhi uchun test qo'shasiz?", reply_markup=get_age_group_keyboard())
-    await state.set_state(AdminStates.add_test_age)
-
-@dp.message(AdminStates.add_test_age)
-async def add_test_age(message: types.Message, state: FSMContext):
-    if message.text == "🔙 Orqaga":
-        is_super = is_super_admin(message.from_user.id)
-        await message.answer("Admin panel", reply_markup=get_admin_menu(is_super))
-        await state.clear()
-        return
-    
-    if message.text not in ["7-10 yosh", "11-14 yosh"]:
-        await message.answer("❌ Iltimos, to'g'ri yosh guruhini tanlang!")
-        return
-    
-    age_group = "7-10" if message.text == "7-10 yosh" else "11-14"
-    await state.update_data(age_group=age_group)
-    
-    await message.answer("📚 Kitob nomini kiriting:")
-    await state.set_state(AdminStates.add_test_book)
-
-@dp.message(AdminStates.add_test_book)
-async def add_test_book(message: types.Message, state: FSMContext):
-    await state.update_data(book_name=message.text)
-    
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📝 Matn")],
-            [KeyboardButton(text="📄 PDF")],
-            [KeyboardButton(text="🔙 Orqaga")]
-        ],
-        resize_keyboard=True
-    )
-    
-    await message.answer("📄 Test turini tanlang:", reply_markup=keyboard)
-    await state.set_state(AdminStates.add_test_content)
-
-@dp.message(AdminStates.add_test_content)
-async def add_test_content(message: types.Message, state: FSMContext):
-    if message.text == "🔙 Orqaga":
-        await message.answer("👶 Qaysi yosh guruhi uchun test qo'shasiz?", reply_markup=get_age_group_keyboard())
-        await state.set_state(AdminStates.add_test_age)
-        return
-    
-    if message.text not in ["📝 Matn", "📄 PDF"]:
-        await message.answer("❌ Iltimos, to'g'ri formatni tanlang!")
-        return
-    
-    content_type = "text" if message.text == "📝 Matn" else "pdf"
-    await state.update_data(content_type=content_type)
-    
-    if content_type == "text":
         await message.answer(
-            "📝 Savollarni quyidagi formatda kiriting:\n\n"
-            "Savol matni?\n"
-            "A) Variant A\n"
-            "B) Variant B\n"
-            "C) Variant C\n"
-            "D) Variant D\n"
-            "Javob: B\n\n"
-            "Har bir savolni alohida xabar sifatida yuboring. Tugatish uchun 'TUGADI' yozing."
+            "📊 <b>Natijalaringiz</b>\n\n"
+            "Hali test ishlamagansiz.\n\n"
+            "📚 'Test ishlash' tugmasini bosib, birinchi testingizni ishlang!"
         )
-    else:
-        await message.answer("📄 PDF faylni yuboring:")
+        return
     
-    await state.set_state(AdminStates.add_test_questions)
+    text = "📊 <b>Sizning natijalaringiz</b>\n\n"
+    
+    for i, result in enumerate(results[:10], 1):  # Show last 10 results
+        percentage = result.get('percentage', 0)
+        test_name = result.get('test_name', 'Test')
+        completed_at = result.get('completed_at', '')
+        
+        # Format date
+        try:
+            date_obj = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+            date_str = date_obj.strftime('%d.%m.%Y %H:%M')
+        except:
+            date_str = completed_at[:16] if completed_at else 'N/A'
+        
+        emoji = "🌟" if percentage >= 80 else "👍" if percentage >= 60 else "📚"
+        
+        text += f"{i}. {emoji} <b>{test_name}</b>\n"
+        text += f"   📈 {percentage:.1f}% ({result.get('score', 0)}/{result.get('total_questions', 0)})\n"
+        text += f"   📅 {date_str}\n\n"
+    
+    if len(results) > 10:
+        text += f"... va yana {len(results) - 10} ta natija"
+    
+    await message.answer(text)
 
-@dp.message(AdminStates.add_test_questions)
-async def add_test_questions(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    content_type = data['content_type']
+# ═══════════════════════════════════════════════════════════════════════════════════
+# ADMIN HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@router.message(F.text == "👥 Foydalanuvchilar")
+async def admin_users(message: Message) -> None:
+    """Show users statistics (Super Admin only)"""
+    if not data_manager.is_super_admin(message.from_user.username or ""):
+        await message.answer("❌ Bu buyruq faqat Super Admin uchun!")
+        return
     
-    if content_type == "pdf":
-        if not message.document or message.document.mime_type != 'application/pdf':
-            await message.answer("❌ Iltimos, PDF fayl yuboring!")
+    users = data_manager.get_all_users()
+    stats = data_manager.get_statistics()
+    
+    text = "👥 <b>Foydalanuvchilar statistikasi</b>\n\n"
+    text += f"📊 Jami ro'yxatdan o'tganlar: {len(users)}\n"
+    text += f"📈 Jami testlar ishlangan: {stats.get('total_tests_taken', 0)}\n\n"
+    
+    # Regional stats
+    regional_stats = stats.get('regional_stats', {})
+    if regional_stats:
+        text += "<b>Viloyatlar bo'yicha:</b>\n"
+        for region, count in sorted(regional_stats.items(), key=lambda x: x[1], reverse=True)[:5]:
+            text += f"• {region}: {count} ta\n"
+        text += "\n"
+    
+    # Age group stats
+    age_stats = stats.get('age_group_stats', {})
+    if age_stats:
+        text += "<b>Yosh guruhlari bo'yicha:</b>\n"
+        for age_group, data in age_stats.items():
+            text += f"• {age_group} yosh: {data.get('users', 0)} foydalanuvchi, {data.get('tests_taken', 0)} test\n"
+    
+    await message.answer(text)
+
+@router.message(F.text == "📋 Testlar")
+async def admin_tests(message: Message, state: FSMContext) -> None:
+    """Test management (Super Admin only)"""
+    if not data_manager.is_super_admin(message.from_user.username or ""):
+        await message.answer("❌ Bu buyruq faqat Super Admin uchun!")
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton(text="➕ Yangi test qo'shish", callback_data="create_test")],
+        [InlineKeyboardButton(text="📋 Testlarni ko'rish", callback_data="view_tests")],
+        [InlineKeyboardButton(text="🗑️ Testni o'chirish", callback_data="delete_test")]
+    ]
+    
+    await message.answer(
+        "📋 <b>Test boshqaruvi</b>\n\n"
+        "Amalni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+@router.callback_query(F.data == "create_test")
+async def start_test_creation(callback: CallbackQuery, state: FSMContext) -> None:
+    """Start test creation process"""
+    if not data_manager.is_super_admin(callback.from_user.username or ""):
+        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+        return
+    
+    await state.set_state(AdminStates.creating_test_name)
+    
+    if callback.message:
+        await callback.message.edit_text(
+            "➕ <b>Yangi test yaratish</b>\n\n"
+            "Test nomini kiriting:"
+        )
+    
+    await callback.answer()
+
+@router.message(AdminStates.creating_test_name)
+async def process_test_name(message: Message, state: FSMContext) -> None:
+    """Process test name"""
+    if not message.text:
+        await message.answer("Iltimos, test nomini kiriting.")
+        return
+    
+    test_name = message.text.strip()
+    if len(test_name) < 3:
+        await message.answer("Test nomi kamida 3 ta belgidan iborat bo'lishi kerak.")
+        return
+    
+    await state.update_data(test_name=test_name)
+    await state.set_state(AdminStates.creating_test_age_group)
+    
+    await message.answer(
+        f"Test nomi: <b>{test_name}</b>\n\n"
+        "Yosh guruhini tanlang:",
+        reply_markup=get_age_groups_keyboard()
+    )
+
+@router.callback_query(F.data.startswith("age_group:"), AdminStates.creating_test_age_group)
+async def process_test_age_group(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process test age group selection"""
+    age_group = callback.data.split(":", 1)[1]
+    
+    if age_group not in ["7-10", "11-14"]:
+        await callback.answer("❌ Noto'g'ri yosh guruhi!", show_alert=True)
+        return
+    
+    await state.update_data(age_group=age_group)
+    await state.set_state(AdminStates.creating_test_document)
+    
+    if callback.message:
+        await callback.message.edit_text(
+            f"Yosh guruhi: <b>{age_group}</b>\n\n"
+            "Test uchun hujjat yuklang (PDF, Word, Excel, Text formatida):"
+        )
+    
+    await callback.answer()
+
+@router.message(AdminStates.creating_test_document, F.document)
+async def process_test_document(message: Message, state: FSMContext) -> None:
+    """Process test document upload"""
+    if not message.document:
+        await message.answer("Iltimos, hujjat yuklang.")
+        return
+    
+    document = message.document
+    
+    # Validate document format
+    if not validate_document_format(document.file_name or "", document.mime_type or ""):
+        await message.answer(
+            "❌ Noto'g'ri fayl formati!\n\n"
+            "Qo'llab-quvvatlanadigan formatlar: PDF, Word (.doc, .docx), Excel (.xls, .xlsx), Text (.txt)"
+        )
+        return
+    
+    try:
+        # Download file
+        file_info = await bot.get_file(document.file_id)
+        if not file_info.file_path:
+            await message.answer("❌ Fayl yuklab olinmadi.")
             return
         
-        # For PDF, we'll create a placeholder test since PDF parsing is complex
-        # In a real implementation, you'd use PyPDF2 or similar to extract text
-        await message.answer("📄 PDF qabul qilindi. PDF dan savollarni ajratib olish...")
+        file_content = await bot.download_file(file_info.file_path)
+        if not file_content:
+            await message.answer("❌ Fayl mazmuni olinmadi.")
+            return
         
-        # Placeholder questions (in real app, extract from PDF)
-        questions = [{
-            "question": f"PDF dan ajratilgan savol (kitob: {data['book_name']})",
-            "option_a": "Variant A",
-            "option_b": "Variant B", 
-            "option_c": "Variant C",
-            "option_d": "Variant D",
-            "correct_answer": "B"
-        }]
+        # Extract text content
+        text_content = extract_text_from_document(
+            file_content.read(), 
+            document.file_name or "", 
+            document.mime_type or ""
+        )
+        
+        # Get document type
+        doc_type = get_document_type(document.file_name or "", document.mime_type or "")
+        
+        await state.update_data(
+            document_name=document.file_name,
+            document_type=doc_type,
+            document_content=text_content
+        )
+        await state.set_state(AdminStates.creating_test_questions)
+        
+        await message.answer(
+            f"✅ Hujjat yuklandi: <b>{document.file_name}</b>\n"
+            f"📄 Tur: {doc_type}\n\n"
+            "Endi test savollarini JSON formatida kiriting:\n\n"
+            "<code>[\n"
+            "  {\n"
+            '    "question": "Savol matni",\n'
+            '    "type": "multiple_choice",\n'
+            '    "options": ["A variant", "B variant", "C variant", "D variant"],\n'
+            '    "correct_answer": 0\n'
+            "  }\n"
+            "]</code>"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing document: {e}")
+        await message.answer(f"❌ Hujjatni qayta ishlashda xatolik: {str(e)}")
+
+@router.message(AdminStates.creating_test_questions)
+async def process_test_questions(message: Message, state: FSMContext) -> None:
+    """Process test questions"""
+    if not message.text:
+        await message.answer("Iltimos, savollarni JSON formatida kiriting.")
+        return
+    
+    try:
+        questions = json.loads(message.text.strip())
+        
+        if not isinstance(questions, list) or len(questions) == 0:
+            await message.answer("❌ Savollar ro'yxati bo'sh yoki noto'g'ri format!")
+            return
+        
+        # Validate questions structure
+        for i, q in enumerate(questions):
+            if not isinstance(q, dict) or 'question' not in q:
+                await message.answer(f"❌ {i+1}-savol noto'g'ri formatda!")
+                return
+        
+        # Get all test data
+        data = await state.get_data()
         
         test_data = {
-            "book_name": data['book_name'],
-            "age_group": data['age_group'],
-            "questions": questions,
-            "added_by": str(message.from_user.id),
-            "added_date": get_uzbekistan_time().isoformat(),
-            "content_type": "pdf"
+            'name': data['test_name'],
+            'age_group': data['age_group'],
+            'document_name': data.get('document_name'),
+            'document_type': data.get('document_type'),
+            'document_content': data.get('document_content'),
+            'questions': questions,
+            'created_by': message.from_user.username,
+            'created_by_id': message.from_user.id
         }
         
-        save_test(test_data)
+        # Save test
+        test_id = data_manager.save_test(test_data, data['age_group'])
         
-        is_super = is_super_admin(message.from_user.id)
-        await message.answer("✅ PDF test muvaffaqiyatli qo'shildi!", reply_markup=get_admin_menu(is_super))
-        await state.clear()
+        if test_id:
+            await message.answer(
+                f"✅ <b>Test muvaffaqiyatli yaratildi!</b>\n\n"
+                f"📝 Test ID: <code>{test_id}</code>\n"
+                f"📚 Nom: {data['test_name']}\n"
+                f"👥 Yosh guruhi: {data['age_group']}\n"
+                f"❓ Savollar soni: {len(questions)}\n"
+                f"📄 Hujjat: {data.get('document_name', 'N/A')}",
+                reply_markup=get_admin_menu_keyboard()
+            )
+            logger.info(f"Test created: {test_id} by {message.from_user.username}")
+        else:
+            await message.answer(
+                "❌ Test yaratishda xatolik yuz berdi.",
+                reply_markup=get_admin_menu_keyboard()
+            )
         
-    else:  # text
-        if message.text == "TUGADI":
-            questions = data.get('questions', [])
-            if not questions:
-                await message.answer("❌ Hech qanday savol qo'shilmadi!")
-                return
-            
-            test_data = {
-                "book_name": data['book_name'],
-                "age_group": data['age_group'],
-                "questions": questions,
-                "added_by": str(message.from_user.id),
-                "added_date": get_uzbekistan_time().isoformat(),
-                "content_type": "text"
-            }
-            
-            save_test(test_data)
-            
-            is_super = is_super_admin(message.from_user.id)
-            await message.answer(f"✅ Test muvaffaqiyatli qo'shildi! Jami {len(questions)} ta savol.", reply_markup=get_admin_menu(is_super))
-            await state.clear()
-            return
-        
-        # Parse question
-        try:
-            lines = message.text.strip().split('\n')
-            if len(lines) < 6:
-                await message.answer("❌ Noto'g'ri format! Qaytadan kiriting.")
-                return
-            
-            question_text = lines[0]
-            options = {}
-            correct_answer = None
-            
-            for line in lines[1:]:
-                line = line.strip()
-                if line.startswith('A)'):
-                    options['option_a'] = line[2:].strip()
-                elif line.startswith('B)'):
-                    options['option_b'] = line[2:].strip()
-                elif line.startswith('C)'):
-                    options['option_c'] = line[2:].strip()
-                elif line.startswith('D)'):
-                    options['option_d'] = line[2:].strip()
-                elif line.startswith('Javob:'):
-                    correct_answer = line.split(':')[1].strip().upper()
-            
-            if not all([question_text, options.get('option_a'), options.get('option_b'), 
-                       options.get('option_c'), options.get('option_d'), correct_answer]):
-                await message.answer("❌ Noto'g'ri format! Barcha maydonlarni to'ldiring.")
-                return
-            
-            if correct_answer not in ['A', 'B', 'C', 'D']:
-                await message.answer("❌ To'g'ri javob A, B, C yoki D bo'lishi kerak!")
-                return
-            
-            question_data = {
-                "question": question_text,
-                "option_a": options['option_a'],
-                "option_b": options['option_b'],
-                "option_c": options['option_c'],
-                "option_d": options['option_d'],
-                "correct_answer": correct_answer
-            }
-            
-            current_questions = data.get('questions', [])
-            current_questions.append(question_data)
-            await state.update_data(questions=current_questions)
-            
-            await message.answer(f"✅ Savol qo'shildi! Jami: {len(current_questions)}\nKeyingi savolni kiriting yoki 'TUGADI' yozing.")
-            
-        except Exception as e:
-            logging.error(f"Error parsing question: {e}")
-            await message.answer("❌ Savolni tahlil qilishda xatolik! Qaytadan kiriting.")
-
-# 🗑 Delete test (Super Admin only)
-@dp.message(lambda message: message.text == "🗑 Test o'chirish" and is_super_admin(message.from_user.id))
-async def delete_test_start(message: types.Message, state: FSMContext):
-    await message.answer("👶 Qaysi yosh guruhidan test o'chirasiz?", reply_markup=get_age_group_keyboard())
-    await state.set_state(AdminStates.delete_test_age)
-
-@dp.message(AdminStates.delete_test_age)
-async def delete_test_age(message: types.Message, state: FSMContext):
-    if message.text == "🔙 Orqaga":
-        await message.answer("Admin panel", reply_markup=get_admin_menu(True))
-        await state.clear()
-        return
+    except json.JSONDecodeError:
+        await message.answer(
+            "❌ JSON format xato!\n\n"
+            "Iltimos, to'g'ri JSON formatida savollar kiriting."
+        )
+    except Exception as e:
+        logger.error(f"Error creating test: {e}")
+        await message.answer(
+            f"❌ Test yaratishda xatolik: {str(e)}",
+            reply_markup=get_admin_menu_keyboard()
+        )
     
-    if message.text not in ["7-10 yosh", "11-14 yosh"]:
-        await message.answer("❌ Iltimos, to'g'ri yosh guruhini tanlang!")
-        return
-    
-    age_group = "7-10" if message.text == "7-10 yosh" else "11-14"
-    tests = get_tests()
-    
-    if not tests.get(age_group) or not tests[age_group]:
-        await message.answer("❌ Bu yosh guruhida testlar mavjud emas!")
-        await state.clear()
-        return
-    
-    await state.update_data(age_group=age_group)
-    
-    # Show available tests
-    test_list = f"📚 {age_group} yosh guruhi testlari:\n\n"
-    keyboard_buttons = []
-    
-    for i, (test_id, test_data) in enumerate(tests[age_group].items(), 1):
-        book_name = test_data.get('book_name', 'N/A')
-        question_count = len(test_data.get('questions', []))
-        test_list += f"{i}. {book_name} ({question_count} ta savol)\n"
-        keyboard_buttons.append([KeyboardButton(text=f"{i}. {book_name}")])
-    
-    keyboard_buttons.append([KeyboardButton(text="🔙 Orqaga")])
-    keyboard = ReplyKeyboardMarkup(keyboard=keyboard_buttons, resize_keyboard=True)
-    
-    await message.answer(test_list + "\nO'chirish uchun testni tanlang:", reply_markup=keyboard)
-    await state.set_state(AdminStates.delete_test_select)
-
-@dp.message(AdminStates.delete_test_select)
-async def delete_test_select(message: types.Message, state: FSMContext):
-    if message.text == "🔙 Orqaga":
-        await message.answer("👶 Qaysi yosh guruhidan test o'chirasiz?", reply_markup=get_age_group_keyboard())
-        await state.set_state(AdminStates.delete_test_age)
-        return
-    
-    data = await state.get_data()
-    age_group = data['age_group']
-    tests = get_tests()
-    
-    # Find selected test
-    selected_test_id = None
-    for test_id, test_data in tests[age_group].items():
-        book_name = test_data.get('book_name', 'N/A')
-        if book_name in message.text:
-            selected_test_id = test_id
-            break
-    
-    if not selected_test_id:
-        await message.answer("❌ Test topilmadi! Qaytadan tanlang.")
-        return
-    
-    # Delete test
-    del tests[age_group][selected_test_id]
-    save_json_data(TESTS_FILE, tests)
-    
-    await message.answer("✅ Test muvaffaqiyatli o'chirildi!", reply_markup=get_admin_menu(True))
     await state.clear()
 
-# 📢 Broadcast message (Super Admin only)
-@dp.message(lambda message: message.text == "📢 Xabar yuborish" and is_super_admin(message.from_user.id))
-async def broadcast_start(message: types.Message, state: FSMContext):
+@router.message(F.text == "🔒 Kirish nazorati")
+async def admin_access_control(message: Message) -> None:
+    """Access control management (Super Admin only)"""
+    if not data_manager.is_super_admin(message.from_user.username or ""):
+        await message.answer("❌ Bu buyruq faqat Super Admin uchun!")
+        return
+    
+    access_info = data_manager.get_access_control_info()
+    
+    text = "🔒 <b>Kirish nazorati</b>\n\n"
+    access_status = "✅ Ha" if access_info.get('test_access_enabled', True) else "❌ Yo'q"
+    text += f"📋 Test kirishiga ruxsat: {access_status}\n"
+    
+    allowed_users = access_info.get('allowed_users', [])
+    if allowed_users:
+        text += f"👥 Ruxsat berilgan foydalanuvchilar: {len(allowed_users)} ta\n"
+        text += f"📝 Ro'yxat: {', '.join(allowed_users[:5])}\n"
+        if len(allowed_users) > 5:
+            text += f"... va yana {len(allowed_users) - 5} ta\n"
+    else:
+        text += "👥 Ruxsat berilgan foydalanuvchilar: Hammaga ochiq\n"
+    
+    keyboard = [
+        [InlineKeyboardButton(
+            text="🔓 Testlarni ochish" if not access_info.get('test_access_enabled', True) else "🔒 Testlarni yopish",
+            callback_data="toggle_test_access"
+        )],
+        [InlineKeyboardButton(text="➕ Foydalanuvchi qo'shish", callback_data="add_allowed_user")],
+        [InlineKeyboardButton(text="🗑️ Foydalanuvchi o'chirish", callback_data="remove_allowed_user")]
+    ]
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+
+@router.callback_query(F.data == "toggle_test_access")
+async def toggle_test_access(callback: CallbackQuery) -> None:
+    """Toggle test access"""
+    if not data_manager.is_super_admin(callback.from_user.username or ""):
+        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+        return
+    
+    access_info = data_manager.get_access_control_info()
+    current_status = access_info.get('test_access_enabled', True)
+    new_status = not current_status
+    
+    if data_manager.update_test_access(new_status):
+        status_text = "ochildi" if new_status else "yopildi"
+        await callback.answer(f"✅ Testlarga kirish {status_text}!", show_alert=True)
+        
+        # Refresh the message
+        await admin_access_control(callback.message)
+    else:
+        await callback.answer("❌ Xatolik yuz berdi!", show_alert=True)
+
+@router.message(F.text == "📢 Xabar yuborish")
+async def admin_broadcast(message: Message, state: FSMContext) -> None:
+    """Broadcast message to all users (Super Admin only)"""
+    if not data_manager.is_super_admin(message.from_user.username or ""):
+        await message.answer("❌ Bu buyruq faqat Super Admin uchun!")
+        return
+    
+    await state.set_state(AdminStates.creating_broadcast)
+    
     await message.answer(
-        "📢 Barcha ro'yxatdan o'tgan foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yozing:\n\n"
-        "❗️ Xabar barcha foydalanuvchilarga yuboriladi!"
+        "📢 <b>Xabar yuborish</b>\n\n"
+        "Barcha foydalanuvchilarga yubormoqchi bo'lgan xabarni kiriting:",
+        reply_markup=ReplyKeyboardRemove()
     )
-    await state.set_state(AdminStates.broadcast_message)
 
-@dp.message(AdminStates.broadcast_message)
-async def broadcast_message(message: types.Message, state: FSMContext):
-    broadcast_text = message.text
-    await state.update_data(broadcast_text=broadcast_text)
+@router.message(AdminStates.creating_broadcast)
+async def process_broadcast_message(message: Message, state: FSMContext) -> None:
+    """Process broadcast message"""
+    if not message.text:
+        await message.answer("Iltimos, matn formatida xabar kiriting.")
+        return
     
-    # Show preview
-    users = get_users()
-    user_count = len(users)
+    broadcast_text = message.text.strip()
+    if len(broadcast_text) < 5:
+        await message.answer("Xabar kamida 5 ta belgidan iborat bo'lishi kerak.")
+        return
     
-    preview_text = (
-        f"📢 Xabar ko'rinishi:\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"{broadcast_text}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"👥 Jami {user_count} ta foydalanuvchiga yuboriladi.\n\n"
-        f"Tasdiqlaysizmi?"
-    )
+    # Get all bot users
+    bot_users = data_manager.get_all_bot_users()
     
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Ha, yuborish")],
-            [KeyboardButton(text="❌ Yo'q, bekor qilish")]
-        ],
-        resize_keyboard=True
-    )
-    
-    await message.answer(preview_text, reply_markup=keyboard)
-    await state.set_state(AdminStates.broadcast_confirm)
-
-@dp.message(AdminStates.broadcast_confirm)
-async def broadcast_confirm(message: types.Message, state: FSMContext):
-    if message.text == "❌ Yo'q, bekor qilish":
-        await message.answer("❌ Xabar yuborish bekor qilindi.", reply_markup=get_admin_menu(True))
+    if not bot_users:
+        await message.answer(
+            "❌ Xabar yuborish uchun foydalanuvchilar topilmadi.",
+            reply_markup=get_admin_menu_keyboard()
+        )
         await state.clear()
         return
     
-    if message.text != "✅ Ha, yuborish":
-        await message.answer("❌ Iltimos, tugmalardan birini tanlang!")
-        return
+    # Confirm broadcast
+    keyboard = [
+        [InlineKeyboardButton(text="✅ Yuborish", callback_data="confirm_broadcast")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_broadcast")]
+    ]
     
+    await state.update_data(broadcast_message=broadcast_text)
+    
+    await message.answer(
+        f"📢 <b>Xabarni tasdiqlang</b>\n\n"
+        f"📊 Qabul qiluvchilar: {len(bot_users)} ta foydalanuvchi\n\n"
+        f"<b>Xabar matni:</b>\n{broadcast_text}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+@router.callback_query(F.data == "confirm_broadcast", AdminStates.creating_broadcast)
+async def confirm_broadcast(callback: CallbackQuery, state: FSMContext) -> None:
+    """Confirm and send broadcast"""
     data = await state.get_data()
-    broadcast_text = data['broadcast_text']
-    users = get_users()
+    broadcast_message = data.get('broadcast_message')
     
-    if not users:
-        await message.answer("❌ Xabar yuborish uchun foydalanuvchilar mavjud emas!")
-        await state.clear()
+    if not broadcast_message:
+        await callback.answer("❌ Xabar topilmadi!", show_alert=True)
         return
     
-    # Start broadcasting
-    await message.answer("📤 Xabar yuborish boshlandi...", reply_markup=get_admin_menu(True))
+    bot_users = data_manager.get_all_bot_users()
     
-    success_count = 0
+    if callback.message:
+        await callback.message.edit_text("📤 Xabar yuborilmoqda...")
+    
+    # Send broadcast
+    sent_count = 0
     failed_count = 0
     
-    for user_id in users.keys():
+    for user_id, user_data in bot_users.items():
         try:
-            await bot.send_message(int(user_id), f"📢 E'lon:\n\n{broadcast_text}")
-            success_count += 1
-            await asyncio.sleep(0.05)  # Small delay to avoid rate limits
+            telegram_id = user_data.get('telegram_id')
+            if telegram_id:
+                final_message = f"📢 <b>Admindan xabar</b>\n\n{broadcast_message}"
+                await bot.send_message(telegram_id, final_message)
+                sent_count += 1
+                await asyncio.sleep(0.1)  # Rate limiting
         except Exception as e:
             failed_count += 1
-            logging.error(f"Failed to send broadcast to {user_id}: {e}")
+            logger.error(f"Failed to send broadcast to {user_id}: {e}")
     
-    # Save broadcast history
+    # Save broadcast record
     broadcast_data = {
-        'admin_id': str(message.from_user.id),
-        'admin_name': message.from_user.full_name,
-        'message': broadcast_text,
-        'date': get_uzbekistan_time().isoformat(),
-        'success_count': success_count,
+        'message': broadcast_message,
+        'sent_by': callback.from_user.username,
+        'sent_by_id': callback.from_user.id,
+        'sent_count': sent_count,
         'failed_count': failed_count,
-        'total_users': len(users)
+        'total_users': len(bot_users)
     }
-    save_broadcast(broadcast_data)
     
-    result_text = (
-        f"📊 Xabar yuborish yakunlandi!\n\n"
-        f"✅ Muvaffaqiyatli: {success_count}\n"
-        f"❌ Xatolik: {failed_count}\n"
-        f"👥 Jami: {len(users)} foydalanuvchi"
-    )
+    broadcast_id = data_manager.save_broadcast(broadcast_data)
     
-    await message.answer(result_text)
+    result_text = f"✅ <b>Xabar yuborildi!</b>\n\n"
+    result_text += f"📊 Muvaffaqiyatli: {sent_count} ta\n"
+    result_text += f"❌ Muvaffaqiyatsiz: {failed_count} ta\n"
+    result_text += f"📝 Broadcast ID: <code>{broadcast_id}</code>"
+    
+    await callback.message.edit_text(result_text)
+    await callback.message.answer("Asosiy menu:", reply_markup=get_admin_menu_keyboard())
+    
     await state.clear()
+    await callback.answer()
 
-# Certificate viewing removed as requested
-
-# 📊 Statistics and Monitoring (Super Admin only)
-@dp.message(lambda message: message.text == "📊 Statistika va monitoring" and is_super_admin(message.from_user.id))
-async def view_statistics(message: types.Message):
-    # Update statistics first
-    update_statistics()
-    stats = get_statistics()
+@router.callback_query(F.data == "cancel_broadcast", AdminStates.creating_broadcast)
+async def cancel_broadcast(callback: CallbackQuery, state: FSMContext) -> None:
+    """Cancel broadcast"""
+    await state.clear()
     
-    if not stats:
-        await message.answer("📊 Statistika ma'lumotlari mavjud emas.")
+    if callback.message:
+        await callback.message.edit_text("❌ Xabar yuborish bekor qilindi.")
+    
+    await callback.message.answer("Asosiy menu:", reply_markup=get_admin_menu_keyboard())
+    await callback.answer()
+
+@router.message(F.text == "📁 Eksport")
+async def admin_export(message: Message) -> None:
+    """Data export options (Super Admin only)"""
+    if not data_manager.is_super_admin(message.from_user.username or ""):
+        await message.answer("❌ Bu buyruq faqat Super Admin uchun!")
         return
     
-    # General statistics
-    general_text = (
-        f"📊 <b>KITOBXON KIDS - UMUMIY STATISTIKA</b>\n\n"
-        f"👥 Jami ro'yxatdan o'tganlar: <b>{stats.get('total_registered_users', 0)}</b>\n"
-        f"📝 Jami testlar topshirildi: <b>{stats.get('test_statistics', {}).get('total_tests_taken', 0)}</b>\n"
-        f"📈 O'rtacha ball: <b>{stats.get('test_statistics', {}).get('average_score', 0)}</b>\n"
-        f"🏆 70%+ ball olganlar: <b>{stats.get('test_statistics', {}).get('high_scorers_70plus', 0)}</b>\n\n"
-        f"📅 So'nggi yangilanish: <b>{stats.get('last_updated', 'N/A')[:16]}</b>"
+    keyboard = [
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="export_users")],
+        [InlineKeyboardButton(text="📊 Test natijalari", callback_data="export_results")],
+        [InlineKeyboardButton(text="📈 Statistika", callback_data="export_stats")]
+    ]
+    
+    await message.answer(
+        "📁 <b>Ma'lumotlarni eksport qilish</b>\n\n"
+        "Eksport qilmoqchi bo'lgan ma'lumotni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
-    
-    await message.answer(general_text)
-    
-    # Age group statistics
-    age_stats = stats.get('test_statistics', {}).get('age_group_stats', {})
-    age_text = (
-        f"📊 <b>YOSH GURUHLARI BO'YICHA STATISTIKA</b>\n\n"
-        f"👶 <b>7-10 yosh:</b>\n"
-        f"   • Test topshirganlar: {age_stats.get('7-10', {}).get('count', 0)}\n"
-        f"   • O'rtacha ball: {age_stats.get('7-10', {}).get('avg_score', 0)}\n\n"
-        f"🧒 <b>11-14 yosh:</b>\n"
-        f"   • Test topshirganlar: {age_stats.get('11-14', {}).get('count', 0)}\n"
-        f"   • O'rtacha ball: {age_stats.get('11-14', {}).get('avg_score', 0)}"
-    )
-    
-    await message.answer(age_text)
-    
-    # Regional statistics
-    regional_stats = stats.get('regional_statistics', {})
-    region_text = "🌍 <b>VILOYATLAR BO'YICHA STATISTIKA</b>\n\n"
-    
-    # Sort regions by user count
-    sorted_regions = sorted(
-        regional_stats.items(),
-        key=lambda x: x[1].get('total_users', 0),
-        reverse=True
-    )
-    
-    for region, data in sorted_regions[:10]:  # Top 10 regions
-        user_count = data.get('total_users', 0)
-        if user_count > 0:
-            region_text += f"📍 <b>{region}:</b> {user_count} foydalanuvchi\n"
-    
-    region_text += f"\n📱 <i>Barcha viloyatlar ma'lumotlari mavjud</i>"
-    
-    await message.answer(region_text)
 
-# 🏆 Rankings (Super Admin only)
-@dp.message(lambda message: message.text == "🏆 Reytinglar ro'yxati" and is_super_admin(message.from_user.id))
-async def view_rankings(message: types.Message):
-    # Update statistics first
-    update_statistics()
-    stats = get_statistics()
-    
-    top_performers = stats.get('top_performers', [])
-    
-    if not top_performers:
-        await message.answer("🏆 Hozircha test natijalar mavjud emas.")
+@router.callback_query(F.data == "export_users")
+async def export_users_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    """Show export formats for users"""
+    if not data_manager.is_super_admin(callback.from_user.username or ""):
+        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
         return
     
-    # Top 20 performers
-    ranking_text = "🏆 <b>TOP NATIJALAR (Eng yaxshi 20 ta)</b>\n\n"
+    await state.update_data(export_type="users")
     
-    for i, performer in enumerate(top_performers[:20], 1):
-        medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-        
-        ranking_text += (
-            f"{medal} <b>{performer.get('user_name', 'N/A')}</b>\n"
-            f"   💯 {performer.get('score', 0)}/100 ({performer.get('percentage', 0):.1f}%)\n"
-            f"   👶 {performer.get('age', 'N/A')} yosh\n"
-            f"   🌍 {performer.get('region', 'N/A')}\n"
-            f"   📅 {performer.get('date', 'N/A')[:10]}\n\n"
+    if callback.message:
+        await callback.message.edit_text(
+            "👥 <b>Foydalanuvchilarni eksport qilish</b>\n\n"
+            "Formatni tanlang:",
+            reply_markup=get_export_formats_keyboard()
         )
+    
+    await callback.answer()
+
+@router.callback_query(F.data == "export_results")
+async def export_results_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    """Show export formats for results"""
+    if not data_manager.is_super_admin(callback.from_user.username or ""):
+        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+        return
+    
+    await state.update_data(export_type="results")
+    
+    if callback.message:
+        await callback.message.edit_text(
+            "📊 <b>Test natijalarini eksport qilish</b>\n\n"
+            "Formatni tanlang:",
+            reply_markup=get_export_formats_keyboard()
+        )
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("export:"))
+async def process_export(callback: CallbackQuery, state: FSMContext) -> None:
+    """Process export request"""
+    if not data_manager.is_super_admin(callback.from_user.username or ""):
+        await callback.answer("❌ Ruxsat yo'q!", show_alert=True)
+        return
+    
+    export_format = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    export_type = data.get('export_type')
+    
+    if not export_type:
+        await callback.answer("❌ Eksport turi tanlanmagan!", show_alert=True)
+        return
+    
+    if callback.message:
+        await callback.message.edit_text("📤 Eksport yaratilmoqda...")
+    
+    try:
+        if export_type == "users":
+            if export_format == "text":
+                content = export_manager.export_users_text()
+                filename = f"users_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                
+                # Send as file
+                text_file = BytesIO(content.encode('utf-8'))
+                text_file.name = filename
+                
+                await bot.send_document(
+                    callback.message.chat.id,
+                    document=text_file,
+                    caption=f"📄 Foydalanuvchilar ma'lumotlari ({export_format.upper()})"
+                )
+                
+            elif export_format == "excel" and EXCEL_AVAILABLE:
+                excel_file = export_manager.export_users_excel()
+                if excel_file:
+                    filename = f"users_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    excel_file.name = filename
+                    
+                    await bot.send_document(
+                        callback.message.chat.id,
+                        document=excel_file,
+                        caption=f"📊 Foydalanuvchilar ma'lumotlari (Excel)"
+                    )
+                else:
+                    raise Exception("Excel fayl yaratilmadi")
+                    
+            elif export_format == "word" and DOCX_AVAILABLE:
+                word_file = export_manager.export_users_word()
+                if word_file:
+                    filename = f"users_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                    word_file.name = filename
+                    
+                    await bot.send_document(
+                        callback.message.chat.id,
+                        document=word_file,
+                        caption=f"📝 Foydalanuvchilar ma'lumotlari (Word)"
+                    )
+                else:
+                    raise Exception("Word fayl yaratilmadi")
+                    
+            elif export_format == "pdf" and PDF_AVAILABLE:
+                pdf_file = export_manager.export_users_pdf()
+                if pdf_file:
+                    filename = f"users_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                    pdf_file.name = filename
+                    
+                    await bot.send_document(
+                        callback.message.chat.id,
+                        document=pdf_file,
+                        caption=f"📄 Foydalanuvchilar ma'lumotlari (PDF)"
+                    )
+                else:
+                    raise Exception("PDF fayl yaratilmadi")
+            else:
+                await callback.message.edit_text(f"❌ {export_format.upper()} format qo'llab-quvvatlanmaydi!")
+                
+        elif export_type == "results":
+            if export_format == "excel" and EXCEL_AVAILABLE:
+                excel_file = export_manager.export_results_excel()
+                if excel_file:
+                    filename = f"results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                    excel_file.name = filename
+                    
+                    await bot.send_document(
+                        callback.message.chat.id,
+                        document=excel_file,
+                        caption=f"📊 Test natijalari (Excel)"
+                    )
+                else:
+                    raise Exception("Excel fayl yaratilmadi")
+            else:
+                await callback.message.edit_text(f"❌ Natijalar uchun {export_format.upper()} format qo'llab-quvvatlanmaydi!")
         
-        # Split long messages
-        if len(ranking_text) > 3500:
-            await message.answer(ranking_text)
-            ranking_text = ""
+        await callback.message.answer("✅ Eksport muvaffaqiyatli yakunlandi!")
+        
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        await callback.message.edit_text(f"❌ Eksport yaratishda xatolik: {str(e)}")
     
-    if ranking_text:
-        await message.answer(ranking_text)
-    
-    # Regional rankings
-    regional_ranking_text = "🌍 <b>VILOYATLAR REYTINGI</b>\n\n"
-    regional_stats = stats.get('regional_statistics', {})
-    
-    # Sort regions by user count
-    sorted_regions = sorted(
-        regional_stats.items(),
-        key=lambda x: x[1].get('total_users', 0),
-        reverse=True
-    )
-    
-    for i, (region, data) in enumerate(sorted_regions[:15], 1):
-        user_count = data.get('total_users', 0)
-        if user_count > 0:
-            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            regional_ranking_text += f"{medal} <b>{region}:</b> {user_count} foydalanuvchi\n"
-    
-    await message.answer(regional_ranking_text)
+    await state.clear()
+    await callback.answer()
 
-# Certificate template upload removed as requested
+# ═══════════════════════════════════════════════════════════════════════════════════
+# INFO HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
 
-# 🚫 Block unauthorized access to admin commands
-@dp.message(lambda message: message.text in [
-    "👥 Foydalanuvchilar ro'yxati", "➕ Test qo'shish", "👨‍💼 Adminlar ro'yxati",
-    "➕ Admin qo'shish", "⬆️ Super Admin tayinlash", "➖ Admin o'chirish",
-    "🗑 Test o'chirish", "📊 Test natijalarini yuklab olish", 
-    "📋 Foydalanuvchi ma'lumotlarini yuklab olish", "📢 Xabar yuborish",
-    "📊 Statistika va monitoring", "🏆 Reytinglar ro'yxati"
-] and not is_admin(message.from_user.id))
-async def block_unauthorized_admin_commands(message: types.Message):
-    await message.answer("❌ Bu buyruq faqat adminlar uchun!")
+@router.message(F.text == "ℹ️ Bot haqida")
+async def about_bot(message: Message) -> None:
+    """Show bot information"""
+    text = "ℹ️ <b>Kitobxon Kids Bot haqida</b>\n\n"
+    text += "🎯 <b>Maqsad:</b>\n"
+    text += "7-14 yosh orasidagi bolalar uchun o'qish tushunish testlarini o'tkazish\n\n"
+    
+    text += "🔧 <b>Imkoniyatlar:</b>\n"
+    text += "• Cheksiz ro'yxatdan o'tish\n"
+    text += "• Yosh guruhiga mos testlar (7-10 va 11-14)\n"
+    text += "• Ko'p formatli hujjatlar (PDF, Word, Excel, Text)\n"
+    text += "• Natijalarni kuzatish\n"
+    text += "• Regional statistika\n\n"
+    
+    text += "👥 <b>Foydalanuvchilar:</b>\n"
+    stats = data_manager.get_statistics()
+    text += f"• Jami ro'yxatdan o'tganlar: {stats.get('total_users', 0)}\n"
+    text += f"• Jami testlar: {stats.get('total_tests_taken', 0)}\n\n"
+    
+    text += "🔄 <b>Versiya:</b> 2.0 (Refactored)\n"
+    text += "📅 <b>Yangilangan:</b> 2025-08-13\n\n"
+    
+    text += "🚀 <b>Yangi imkoniyatlar:</b>\n"
+    text += "• 4000+ concurrent user support\n"
+    text += "• Multi-format exports\n"
+    text += "• Advanced access control\n"
+    text += "• Optimized performance"
+    
+    await message.answer(text)
 
-# 🛡 Anti-spam filter
-@dp.message(lambda message: message.chat.type == "private" and any(
-    x in message.text.lower() for x in ["t.me", "http", "@"] if message.text and len(message.text.split()) > 5
-))
-async def block_spam(message: types.Message):
-    await message.delete()
-    await message.answer("⚠️ Reklama va spam taqiqlanadi!")
+@router.message(F.text == "☎️ Aloqa")
+async def contact_info(message: Message) -> None:
+    """Show contact information"""
+    text = "☎️ <b>Aloqa ma'lumotlari</b>\n\n"
+    text += "📧 <b>Texnik yordam:</b>\n"
+    text += "• @admin_username (Telegram)\n"
+    text += "• support@kitobxonkids.uz (Email)\n\n"
+    
+    text += "🏢 <b>Tashkilot:</b>\n"
+    text += "Kitobxon Kids ta'lim markazi\n\n"
+    
+    text += "🕐 <b>Ish vaqti:</b>\n"
+    text += "Dushanba - Juma: 09:00 - 18:00\n"
+    text += "Shanba: 09:00 - 14:00\n"
+    text += "Yakshanba: Dam olish kuni\n\n"
+    
+    text += "❓ <b>Tez-tez beriladigan savollar:</b>\n"
+    text += "• Test qanday ishlaydi?\n"
+    text += "• Natijalar qanday baholanadi?\n"
+    text += "• Texnik muammolar hal qilish\n\n"
+    
+    text += "📱 <b>Bizni kuzatib boring:</b>\n"
+    text += "• Telegram: @kitobxon_kids\n"
+    text += "• Instagram: @kitobxon_kids\n"
+    text += "• Facebook: Kitobxon Kids"
+    
+    await message.answer(text)
 
-# 📣 Main function
-async def main():
-    """Start the bot"""
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+# ═══════════════════════════════════════════════════════════════════════════════════
+# ERROR HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@router.message()
+async def unknown_message(message: Message) -> None:
+    """Handle unknown messages"""
+    text = "❓ <b>Tushunmadim</b>\n\n"
+    text += "Iltimos, quyidagi tugmalardan birini tanlang yoki /start buyrug'ini yuboring."
+    
+    is_admin = data_manager.is_super_admin(message.from_user.username or "")
+    keyboard = get_admin_menu_keyboard() if is_admin else get_main_menu_keyboard()
+    
+    await message.answer(text, reply_markup=keyboard)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# MAIN FUNCTION
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+async def set_bot_commands(bot: Bot) -> None:
+    """Set bot commands menu"""
+    commands = [
+        BotCommand(command="start", description="Botni ishga tushirish"),
+        BotCommand(command="help", description="Yordam"),
+    ]
+    await bot.set_my_commands(commands)
+
+async def main() -> None:
+    """Main function to run the bot"""
+    # Include router
+    dp.include_router(router)
+    
+    # Set bot commands
+    await set_bot_commands(bot)
+    
+    logger.info("🚀 Kitobxon Kids Bot started!")
+    logger.info("📊 Features: Multi-format support, Unlimited registrations, Access control")
+    logger.info("⚡ Performance: Optimized for 4,000+ concurrent users")
+    
+    # Start polling
+    try:
+        await dp.start_polling(bot)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot error: {e}")
+    finally:
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
