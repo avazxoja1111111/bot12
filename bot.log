@@ -1,4 +1,0 @@
-  File "/home/runner/workspace/main.py", line 2079
-    )
-    ^
-SyntaxError: f-string expression part cannot include a backslash
