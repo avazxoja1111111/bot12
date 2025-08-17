@@ -43,7 +43,7 @@ except ImportError:
     SimpleDocTemplate = None
 
 # Bot configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7570796885:AAFkj7iY05fQUG21015viY7Gy8ifXXcnOpA")
 ADMINS = [int(x) for x in os.getenv("ADMIN_IDS", "6578706277,7853664401").split(",")]
 
 # Logging setup
