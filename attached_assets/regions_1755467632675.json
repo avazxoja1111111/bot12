@@ -1,0 +1,98 @@
+{
+  "Toshkent": {
+    "districts": ["Chilonzor", "Shayxontohur", "Yunusobod", "Mirzo Ulug'bek", "Yakkasaroy", "Mirobod"],
+    "mahallas": {
+      "Chilonzor": ["1-mahalla", "2-mahalla", "3-mahalla"],
+      "Shayxontohur": ["Markaziy", "Sharqiy", "G'arbiy"],
+      "Yunusobod": ["Yangi Yunusobod", "Eski Yunusobod"]
+    }
+  },
+  "Samarqand": {
+    "districts": ["Samarqand shahar", "Urgut", "Bulung'ur", "Ishtixon", "Kattaqo'rg'on"],
+    "mahallas": {
+      "Samarqand shahar": ["Registon", "Siob", "Darvozaboy"],
+      "Urgut": ["Markaz", "Yangiobod"],
+      "Bulung'ur": ["Markaz", "Qishloq"]
+    }
+  },
+  "Farg'ona": {
+    "districts": ["Farg'ona shahar", "Marg'ilon", "Qo'qon", "Beshariq", "Bog'dod"],
+    "mahallas": {
+      "Farg'ona shahar": ["Markaz", "Yangi shahar"],
+      "Marg'ilon": ["Ipak yo'li", "Hunarmandchilik"],
+      "Qo'qon": ["Eski shahar", "Yangi shahar"]
+    }
+  },
+  "Andijon": {
+    "districts": ["Andijon shahar", "Xo'jaobod", "Asaka", "Baliqchi", "Bo'z"],
+    "mahallas": {
+      "Andijon shahar": ["Markaz", "Sanoat"],
+      "Xo'jaobod": ["Qishloq", "Shahar"],
+      "Asaka": ["Markaz"]
+    }
+  },
+  "Namangan": {
+    "districts": ["Namangan shahar", "To'raqo'rg'on", "Uchqo'rg'on", "Chust", "Pop"],
+    "mahallas": {
+      "Namangan shahar": ["Markaz", "Sanoat zone"],
+      "To'raqo'rg'on": ["Markaz", "Qishloq"],
+      "Chust": ["Hunarmandchilik", "Dehqonchilik"]
+    }
+  },
+  "Qashqadaryo": {
+    "districts": ["Qarshi", "Shahrisabz", "Kitob", "Yakkabog'", "Chiroqchi"],
+    "mahallas": {
+      "Qarshi": ["Markaz", "Sanoat"],
+      "Shahrisabz": ["Tarixiy markaz", "Yangi shahar"],
+      "Kitob": ["Markaz"]
+    }
+  },
+  "Surxondaryo": {
+    "districts": ["Termiz", "Denov", "Qaraqo'l", "Sho'rchi", "Muzrabot"],
+    "mahallas": {
+      "Termiz": ["Markaz", "Port zone"],
+      "Denov": ["Markaz", "Qishloq"],
+      "Qaraqo'l": ["Markaz"]
+    }
+  },
+  "Sirdaryo": {
+    "districts": ["Guliston", "Yangiyer", "Sirdaryo", "Boyovut", "Mirzaobod"],
+    "mahallas": {
+      "Guliston": ["Markaz", "Sanoat"],
+      "Yangiyer": ["Markaz", "Qishloq"],
+      "Sirdaryo": ["Markaz"]
+    }
+  },
+  "Jizzax": {
+    "districts": ["Jizzax shahar", "G'allaorol", "Zomin", "Baxtiyor", "Mirzacho'l"],
+    "mahallas": {
+      "Jizzax shahar": ["Markaz", "Yangi shahar"],
+      "G'allaorol": ["Markaz", "Qishloq"],
+      "Zomin": ["Tog'li", "Tekislik"]
+    }
+  },
+  "Navoiy": {
+    "districts": ["Navoiy shahar", "Zarafshon", "Nurota", "Karmana", "Qiziltepa"],
+    "mahallas": {
+      "Navoiy shahar": ["Markaz", "Sanoat"],
+      "Zarafshon": ["Oltin qazish", "Shahar"],
+      "Nurota": ["Tarixiy", "Markaz"]
+    }
+  },
+  "Buxoro": {
+    "districts": ["Buxoro shahar", "G'ijduvon", "Kogon", "Olot", "Peshku"],
+    "mahallas": {
+      "Buxoro shahar": ["Eski shahar", "Yangi shahar"],
+      "G'ijduvon": ["Markaz", "Qishloq"],
+      "Kogon": ["Temir yo'l", "Markaz"]
+    }
+  },
+  "Xorazm": {
+    "districts": ["Urganch", "Xiva", "Bog'ot", "Gurlan", "Qo'shko'pir"],
+    "mahallas": {
+      "Urganch": ["Markaz", "Sanoat"],
+      "Xiva": ["Ichan qal'a", "Tashqi shahar"],
+      "Bog'ot": ["Markaz"]
+    }
+  }
+}

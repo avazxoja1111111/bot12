@@ -1,0 +1,132 @@
+import logging
+import asyncio
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import (
+    Message, KeyboardButton, ReplyKeyboardMarkup,
+    ReplyKeyboardRemove
+)
+from aiogram.filters import CommandStart
+
+# 🔑 Bot tokeningizni shu yerga yozing
+BOT_TOKEN = "YOUR_BOT_TOKEN"
+
+# 📌 Adminlar ID'lari
+ADMINS = [6578706277, 7853664401]
+
+# 🔧 Logging
+logging.basicConfig(level=logging.INFO)
+
+# 🔧 Bot va Dispatcher
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+# 🔧 Foydalanuvchi ma'lumotlarini vaqtincha saqlash
+user_data = {}
+
+# 🔧 Viloyatlar va tumanlar (namuna uchun qisqartirilgan)
+viloyatlar = {
+    "Toshkent": ["Chilonzor", "Shayxontohur", "Yunusobod"],
+    "Samarqand": ["Samarqand shahar", "Urgut", "Bulung‘ur"],
+    "Farg‘ona": ["Farg‘ona shahar", "Marg‘ilon", "Qo‘qon"]
+}
+
+
+# 📌 START komandasi
+@dp.message(CommandStart())
+async def start_cmd(message: Message):
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="☎️ Telefon raqamni yuborish", request_contact=True)],
+                  [KeyboardButton(text="📚 Loyiha haqida")]],
+        resize_keyboard=True
+    )
+    await message.answer("👋 Salom! 'Kitobxon Kids' loyihasiga xush kelibsiz!\n\nRo‘yxatdan o‘tish uchun telefon raqamingizni yuboring:", reply_markup=kb)
+
+
+# 📌 Telefon raqam qabul qilish
+@dp.message(F.contact)
+async def get_contact(message: Message):
+    user_data[message.from_user.id] = {"phone": message.contact.phone_number}
+    await message.answer("👶 Bolaning ism-sharifini kiriting:", reply_markup=ReplyKeyboardRemove())
+
+
+# 📌 Bolaning ismi
+@dp.message(F.text, ~F.text.lower().in_({"📚 loyiha haqida"}))
+async def get_child_name(message: Message):
+    uid = message.from_user.id
+    if "child_name" not in user_data.get(uid, {}):
+        user_data[uid]["child_name"] = message.text
+        await message.answer("👨‍👩‍👧 Ota-onaning ism-sharifini kiriting:")
+    elif "parent_name" not in user_data[uid]:
+        user_data[uid]["parent_name"] = message.text
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="7–10 yosh")],
+                      [KeyboardButton(text="11–14 yosh")]],
+            resize_keyboard=True
+        )
+        await message.answer("📌 Yosh toifasini tanlang:", reply_markup=kb)
+    elif "age_group" not in user_data[uid]:
+        user_data[uid]["age_group"] = message.text
+        kb = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=v)] for v in viloyatlar.keys()] +
+                    [[KeyboardButton(text="Qo‘lda kiritish")]],
+            resize_keyboard=True
+        )
+        await message.answer("🏢 Viloyatni tanlang yoki qo‘lda kiriting:", reply_markup=kb)
+    elif "region" not in user_data[uid]:
+        if message.text == "Qo‘lda kiritish":
+            await message.answer("✍️ Viloyat nomini yozib kiriting:")
+        else:
+            user_data[uid]["region"] = message.text
+            kb = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text=t)] for t in viloyatlar.get(message.text, [])] +
+                        [[KeyboardButton(text="Qo‘lda kiritish")]],
+                resize_keyboard=True
+            )
+            await message.answer("🏙 Tuman/Shaharni tanlang yoki qo‘lda kiriting:", reply_markup=kb)
+    elif "district" not in user_data[uid]:
+        if message.text == "Qo‘lda kiritish":
+            await message.answer("✍️ Tuman/Shahar nomini yozib kiriting:")
+        else:
+            user_data[uid]["district"] = message.text
+            await message.answer("🏡 Mahallangizni yozib kiriting:", reply_markup=ReplyKeyboardRemove())
+    elif "neighborhood" not in user_data[uid]:
+        user_data[uid]["neighborhood"] = message.text
+
+        # ✅ Ro‘yxat tugadi
+        data = user_data[uid]
+        text = (f"✅ Siz ro‘yxatdan muvaffaqiyatli o‘tdingiz!\n\n"
+                f"👶 Bola: {data['child_name']}\n"
+                f"👨‍👩‍👧 Ota/Ona: {data['parent_name']}\n"
+                f"📞 Telefon: {data['phone']}\n"
+                f"📌 Yosh toifa: {data['age_group']}\n"
+                f"🏢 Viloyat: {data.get('region', 'Noma’lum')}\n"
+                f"🏙 Tuman/Shahar: {data.get('district', 'Noma’lum')}\n"
+                f"🏡 Mahalla: {data.get('neighborhood', 'Noma’lum')}")
+        await message.answer(text)
+
+        # Adminlarga yuborish
+        for admin_id in ADMINS:
+            try:
+                await bot.send_message(admin_id, f"📥 Yangi ro‘yxatdan o‘tuvchi:\n\n{text}")
+            except:
+                pass
+
+
+# 📌 "📚 Loyiha haqida"
+@dp.message(F.text.lower() == "📚 loyiha haqida")
+async def about_project(message: Message):
+    await message.answer(
+        "📚 *Kitobxon Kids* loyihasi haqida ma’lumot:\n\n"
+        "👉 Tanlov 7–10 va 11–14 yosh toifalari uchun.\n"
+        "👉 Ishtirokchilar ro‘yxatdan o‘tib, kitobxonlik bo‘yicha bellashadilar.\n"
+        "👉 Qo‘shimcha nizom va qoidalar adminlar tomonidan yuboriladi.",
+        parse_mode="Markdown", disable_web_page_preview=True
+    )
+
+
+# 🔧 Botni ishga tushirish
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
