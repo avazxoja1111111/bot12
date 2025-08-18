@@ -2,3 +2,7 @@ aiogram
 reportlab
 openpyxl
 PyPDF2
+python-telegram-bot==20.3
+pandas
+openpyxl
+reportlab
