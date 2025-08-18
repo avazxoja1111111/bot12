@@ -1,0 +1,110 @@
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, Sticker
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
+
+# Bosqichlar
+NAME, SURNAME, PHONE, AGE, REGION, DISTRICT, NEIGHBORHOOD, FEEDBACK = range(8)
+
+# Adminlar
+ADMINS = [6578706277, 7853664401]
+
+# Viloyatlar va ularning tumanlari
+LOCATIONS = {
+    "Toshkent": ["Bektemir", "Chilonzor", "Mirzo Ulug'bek", "Mirobod", "Olmazor", "Sergeli", "Shayxontohur", "Uchtepa", "Yakkasaroy", "Yunusobod"],
+    "Andijon": ["Andijon", "Asaka", "Baliqchi", "Bo‘z", "Bulung‘ur", "Izboskan", "Jalaquduq", "Marhamat", "Oltinko‘l", "Paxtaobod", "Shahrixon", "Ulug‘nor"],
+    "Buxoro": ["Buxoro", "G‘ijduvon", "Jondor", "Kogon", "Peshku", "Qorako‘l", "Romitan", "Shofirkon", "Vobkent"],
+    "Farg‘ona": ["Farg‘ona", "Beshariq", "Bog‘dod", "Buvayda", "Dang‘ara", "Qo‘qon", "Quva", "Rishton", "So‘x", "Toshloq", "Uchko‘prik", "Yozyovon", "Marg‘ilon"],
+    "Jizzax": ["Jizzax", "Arnasoy", "Baxmal", "Zafarobod", "Do‘stlik", "Forish", "G‘allaorol", "Mirzacho‘l", "Paxtakor", "Yangiobod"],
+    "Qashqadaryo": ["Qarshi", "Chiroqchi", "G‘uzor", "Dehqonobod", "Koson", "Muborak", "Nishon", "Qarshi", "Shahrisabz", "Yakkabog‘", "Kitob", "Mirishkor"],
+    "Navoiy": ["Navoiy", "Karmana", "Konimex", "Navbahor", "Nurota", "Tomdi", "Uchquduq", "Xatirchi", "Zarafshon"],
+    "Namangan": ["Namangan", "Chortoq", "Kosonsoy", "Mingbuloq", "Norin", "Pop", "To‘raqo‘rg‘on", "Uychi", "Yangiqo‘rg‘on"],
+    "Samarqand": ["Samarqand", "Bulung‘ur", "Ishtixon", "Jomboy", "Kattakurgan", "Narpay", "Payariq", "Pastdarg‘om", "Qo‘shrabot", "Samarqand shahar", "Toyloq", "Urgut"],
+    "Sirdaryo": ["Sirdaryo", "Boyovut", "Guliston", "Oqoltin", "Sardoba", "Sayxunobod", "Sirdaryo", "Shirin", "Xovos", "Yangiyer"],
+    "Surxondaryo": ["Termiz", "Boysun", "Denov", "Jarqo‘rg‘on", "Muzrabot", "Oltinsoy", "Sariosiyo", "Sherobod", "Sho‘rchi", "Termiz shahar", "Uzun", "Qiziriq"],
+    "Xorazm": ["Urganch", "Bog‘ot", "Gurlan", "Qo‘shko‘pir", "Shovot", "Xonqa", "Xiva", "Yangiariq", "Yangiqo‘rg‘on"]
+}
+
+# Foydalanuvchi holati
+user_state = {}
+
+# /start
+def start(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id] = {"step": "name", "data": {}}
+    update.message.reply_sticker(sticker="CAACAgIAAxkBAAEBH0FiXXXXXXXX")  # Misol stiker
+    update.message.reply_text("Assalomu alaykum! Kitobxon Kids botiga xush kelibsiz.\nIltimos, ismingizni kiriting:")
+    return NAME
+
+def name(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id]["data"]["name"] = update.message.text
+    update.message.reply_text("Familiyangizni kiriting:")
+    return SURNAME
+
+def surname(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id]["data"]["surname"] = update.message.text
+    update.message.reply_text("Telefon raqamingizni kiriting:")
+    return PHONE
+
+def phone(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id]["data"]["phone"] = update.message.text
+    update.message.reply_text("Yoshingizni tanlang:", reply_markup=ReplyKeyboardMarkup([["7–10 yosh"], ["11–14 yosh"]], one_time_keyboard=True))
+    return AGE
+
+def age(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id]["data"]["age"] = update.message.text
+    update.message.reply_text("Viloyatingizni tanlang:", reply_markup=ReplyKeyboardMarkup([[v] for v in LOCATIONS.keys()], one_time_keyboard=True))
+    return REGION
+
+def region(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    region_text = update.message.text
+    if region_text not in LOCATIONS:
+        update.message.reply_text("Iltimos, ro'yxatdagi viloyatni tanlang.")
+        return REGION
+    user_state[chat_id]["data"]["region"] = region_text
+    update.message.reply_text("Tumaningizni tanlang:", reply_markup=ReplyKeyboardMarkup([[d] for d in LOCATIONS[region_text]], one_time_keyboard=True))
+    return DISTRICT
+
+def district(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id]["data"]["district"] = update.message.text
+    update.message.reply_text("Mahallangizni yozing:", reply_markup=ReplyKeyboardRemove())
+    return NEIGHBORHOOD
+
+def neighborhood(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    user_state[chat_id]["data"]["neighborhood"] = update.message.text
+    update.message.reply_text("Ro‘yxatdan muvaffaqiyatli o‘tdingiz! ✅")
+    
+    # Adminlarga yuborish
+    for admin_id in ADMINS:
+        context.bot.send_message(admin_id, f"Yangi foydalanuvchi:\nIsm: {user_state[chat_id]['data']['name']}\nFamiliya: {user_state[chat_id]['data']['surname']}\nTelefon: {user_state[chat_id]['data']['phone']}\nYosh: {user_state[chat_id]['data']['age']}\nViloyat: {user_state[chat_id]['data']['region']}\nTuman: {user_state[chat_id]['data']['district']}\nMahalla: {user_state[chat_id]['data']['neighborhood']}")
+    return ConversationHandler.END
+
+def about(update: Update, context: CallbackContext):
+    update.message.reply_text("Kitobxon Kids loyihasi bolalar uchun bilim va kitob o‘qish imkoniyatini yaratadi. 7–14 yosh bolalar ishtirok etishi mumkin.")
+
+def feedback_start(update: Update, context: CallbackContext):
+    update.message.reply_text("Iltimos, fikr-mulohazangizni yozing:")
+    return FEEDBACK
+
+def feedback_receive(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    feedback_text = update.message.text
+    update.message.reply_text("Fikr-mulohaza uchun rahmat!")
+    for admin_id in ADMINS:
+        context.bot.send_message(admin_id, f"Fikr-mulohaza:\n{feedback_text}")
+    return ConversationHandler.END
+
+def cancel(update: Update, context: CallbackContext):
+    update.message.reply_text("Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
+    return ConversationHandler.END
+
+def main():
+    updater = Updater("SIZNING_BOT_TOKEN")
+    dp = updater.dispatcher
+
+    conv_handler = ConversationHandler

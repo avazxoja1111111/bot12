@@ -1,0 +1,183 @@
+Technical Specification: Kitobxon Kids Telegram Bot Upgrade (Updated)
+
+Project Goal:
+Enhance the existing Kitobxon Kids Telegram bot with advanced test features for children, a dual-role system (user and admin), and robust admin functionalities while ensuring scalability for 4000+ concurrent users. All functionality must be implemented in a single Python file. No multiple files or external scripts are allowed.
+
+1. User Roles
+1.1 Ordinary User
+
+Can register with full details (name, surname, phone, age, region, district, neighborhood).
+
+Can view “About Project” section.
+
+Can submit feedback.
+
+Test Feature:
+
+Two age groups: 7–10 and 11–14.
+
+Four books per age group, each book contains 25 questions.
+
+Each correct answer = 4 points.
+
+Test duration = 20 seconds per question.
+
+If user exceeds 20 seconds, the system automatically moves to the next question and informs the user about the timeout.
+
+Questions are randomly selected from the book-specific pool.
+
+Results are stored for reporting.
+
+1.2 Admin
+
+Can view registered users.
+
+Can upload, edit, and remove test questions for each book and age group.
+
+Can assign tests to users.
+
+Can download user lists and test results in PDF or Excel format.
+
+Should have tools for real-time monitoring of ongoing tests.
+
+2. Test System Requirements
+
+Test Creation
+
+Admin can add test questions via bot interface or by uploading a structured file (Excel/CSV).
+
+Each question includes:
+
+Book name
+
+Question text
+
+4 answer options
+
+Correct answer
+
+Test Execution
+
+Each user receives randomized questions based on their age group.
+
+Time limit per question = 20 seconds.
+
+System must handle automatic timeouts without freezing the bot.
+
+Scores are calculated automatically.
+
+Test Reporting
+
+Admin can export:
+
+Individual test results
+
+Overall performance by age group and book
+
+Export format: Excel (.xlsx) or PDF (.pdf)
+
+Reports include:
+
+User name & surname
+
+Age group
+
+Selected book
+
+Score and percentage
+
+3. Bot Architecture & Scalability
+
+Language: Python (with python-telegram-bot or aiogram)
+
+Database: SQLite or any embedded DB (all in a single Python file) to store:
+
+Users
+
+Test questions
+
+Test results
+
+Single File Requirement: All logic, database schema, and execution must reside in one .py file. No external modules apart from standard Python libraries and pip-installable dependencies.
+
+Asynchronous Handling:
+
+Must support 4000+ concurrent users.
+
+Use async message handling to prevent freezing.
+
+Implement queue system for tests to manage high load.
+
+Randomization:
+
+Questions for each test session should be randomized.
+
+Users in the same age group receive different sequences to prevent cheating.
+
+4. User Flow
+4.1 Registration Flow
+
+/start → ask name → surname → phone → age → region → district → neighborhood.
+
+Save user details in DB.
+
+Confirmation message with sticker.
+
+4.2 Test Flow
+
+User selects test → age group → book.
+
+Bot sends 25 questions one by one.
+
+Each question has 4 answer buttons.
+
+Countdown timer = 20 seconds per question.
+
+If timeout → skip question → notify user.
+
+After the last question → show total score → save results to DB.
+
+5. Admin Flow
+5.1 Users Management
+
+View all registered users.
+
+Export user list in PDF/Excel.
+
+5.2 Test Management
+
+Add/Edit/Delete questions.
+
+Assign tests to specific users or age groups.
+
+Export test results for all users.
+
+6. Data Integrity & Error Handling
+
+All user input should be validated (age range, phone number format, etc.)
+
+System must handle:
+
+Timeouts gracefully
+
+Concurrent users
+
+Database errors without crashing
+
+All critical operations must be transactional (atomic commits).
+
+7. Additional Requirements
+
+Use sticker messages for fun and motivation at key points:
+
+Registration success
+
+Test start
+
+Test completion
+
+Ensure separation of two age group tests to avoid mixing questions.
+
+All code must be well-documented and modular for maintainability.
+
+Single file only: no multiple files or external scripts. Everything must run from one Python file.
