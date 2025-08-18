@@ -1,8 +1,7 @@
 aiogram
-reportlab
-openpyxl
-PyPDF2
 python-telegram-bot==13.15
-pandas
 urllib3
+pandas
+openpyxl
+reportlab
 six
